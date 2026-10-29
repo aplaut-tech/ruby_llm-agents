@@ -6,7 +6,7 @@ Detailed installation instructions for RubyLLM::Agents.
 
 | Dependency | Minimum Version | Notes |
 |------------|-----------------|-------|
-| Ruby | 3.1.0 | Required for pattern matching |
+| Ruby | 3.2.0 | Required by RubyLLM 2.1 |
 | Rails | 7.0 | Requires Hotwire for dashboard |
 | PostgreSQL/MySQL/SQLite | Any | For execution tracking |
 
@@ -16,7 +16,7 @@ RubyLLM::Agents automatically installs:
 
 ```ruby
 gem "rails", ">= 7.0"
-gem "ruby_llm", ">= 1.12.0"       # LLM client library
+gem "ruby_llm", ">= 2.1", "< 2.2" # LLM client library
 gem "turbo-rails", ">= 1.0"       # Hotwire Turbo for real-time UI
 gem "stimulus-rails", ">= 1.0"    # Hotwire Stimulus for JavaScript
 gem "chartkick", ">= 5.0"         # Beautiful charts for analytics

@@ -139,10 +139,10 @@ Instructions for the LLM. Return nil for no system prompt.
 ## Optional Overrides
 
 ### `schema`
-Return a `RubyLLM::Schema` for structured JSON output:
+Return a `Schematist::Schema` for structured JSON output:
 ```ruby
 def schema
-  @schema ||= RubyLLM::Schema.create do
+  @schema ||= Schematist::Schema.create do
     string :result, description: "The result"
     integer :confidence, description: "Confidence 1-100"
     array :tags do

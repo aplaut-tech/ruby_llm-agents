@@ -7,8 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Requires RubyLLM 2.1** (`>= 2.1, < 2.2`) and therefore Ruby >= 3.2. RubyLLM 2
+changed its message, tool and provider APIs; the gem now speaks the new ones.
+Agents keep working as before; the behavior changes that show are listed below.
+
+### Changed
+
+- **Structured output uses Schematist** — the `schema`/`returns` block now builds a `Schematist::Schema` (the DSL RubyLLM 2 ships with) instead of `RubyLLM::Schema`; the DSL itself is unchanged. RubyLLM 2 keeps structured output as JSON text in `Message#content`, so the agent parses it (`Message#parsed`) and still returns a Hash with symbolized keys. Content that is not valid JSON is returned as is
+- **`Tool#halt` raises `RubyLLM::Agents::Tool::Halt`** — RubyLLM 2 has no tool result that stops the loop, so halting unwinds it. The agent catches the halt and returns its content as the result, with the tokens and cost of the rounds already billed, `finish_reason` `"halt"` and a successful execution. The halting `ToolExecution` is completed as `success`. Tools must let `Tool::Halt` propagate: a `rescue => e` around `halt` swallows it. Outside an agent (a tool on a plain `RubyLLM.chat`), the halt reaches the caller
+- **Tools follow RubyLLM 2's tool API** — `RubyLLM::Agents::Tool#call` takes keyword arguments (`call(tool_call: nil, **args)`), and parameters are declared with `parameter :name, description:, type:, required:`; RubyLLM 2 removed `param`/`desc`
+- **Finish reasons are normalized** — RubyLLM 2 reports `:stop`, `:max_tokens`, `:tool_calls` and `:content_filter`; results and executions record them as `"stop"`, `"length"`, `"tool_calls"` and `"content_filter"` (anything else as `"other"`), so `Result#truncated?` and the `truncated` scope keep working
+- **Token usage is read from `Message#tokens`** — input, output, cache read/write and thinking tokens, and the answering model from `Message#model`. Usage is still summed across the rounds of a tool loop, with the last request's own usage in `metadata["llm_usage"]`
+- **Anthropic prompt caching** marks the system prompt as a cache boundary with `with_instructions(..., cache_until_here: true)`, and the last tool through its `provider_options`
+- **`tool_concurrency`** is applied with `Chat#with_tool_options(concurrency:)`
+- **Transcriber** passes the output format as `format:` and timestamp granularities as `timestamps:`. Subtitle formats (`srt`, `vtt`) no longer request timestamp granularities, which RubyLLM 2 only serves as `verbose_json`
+- **Inception provider** is a RubyLLM 2 provider of its own (Chat Completions protocol) registered with a bundled Mercury model catalog; `inception_api_base` can point it at another endpoint
+- **`Execution::FINISH_REASONS`** includes `"halt"`
+
 ### Fixed
 
+- **Assistant prefill returned the prefill itself** on RubyLLM 2, whose `Chat#complete` treats a trailing assistant message as an answered turn. The continuation is now requested with `Chat#generate`
+- **Tool-loop usage was not summed for `RubyLLM::Agents::Base` agents** — only direct `BaseAgent` subclasses kept the client the accounting reads
+- **A halted run was recorded as an error** — its `"halt"` finish reason failed the execution's validation
 - **Tool loops recorded only the final round's tokens and cost** — a run with several provider requests billed every round but persisted one. Input and output tokens are now summed across the rounds of the attempt, with the last request's own usage kept in `metadata["llm_usage"]` (#35, thanks @symphony-stream)
 - **Failed runs recorded zero tokens and $0** even when earlier rounds of the tool loop had completed and been billed. Usage up to the failure is now recovered before the error propagates (#35, thanks @symphony-stream)
 - **Cache reads, cache writes and reasoning tokens in a tool loop were priced from the final round only** — every round re-reads the cached prefix, so long loops under-reported most of their cache spend. These are now summed across rounds like input and output tokens
