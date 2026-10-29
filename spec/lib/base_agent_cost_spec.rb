@@ -35,16 +35,15 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "cost calculation" do
     tokens = RubyLLM::Tokens.new(
       input: 1,
       output: 1,
-      cached: cache_read,
-      cache_creation: cache_write,
+      cache_read: cache_read,
+      cache_write: cache_write,
       thinking: thinking
     )
-    text = Struct.new(
-      :input, :output, :cache_read_input, :cache_write_input, :reasoning_output,
-      keyword_init: true
-    ).new(**prices)
-    pricing = Struct.new(:text_tokens).new(text)
-    model = Struct.new(:pricing).new(pricing)
+    model = RubyLLM::Model.new(
+      id: "pricing-fixture",
+      provider: "openai",
+      pricing: {text_tokens: {standard: prices.compact.transform_keys { |kind| :"#{kind}_per_million" }}}
+    )
 
     RubyLLM::Cost.new(tokens: tokens, model: model)
   end
@@ -56,7 +55,7 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "cost calculation" do
   describe "#calculate_costs non-text components" do
     it "adds cache and reasoning cost on top of text input/output" do
       extra = build_cost(cache_read: 2000, cache_write: 100, thinking: 300, prices: full_prices)
-      response = double("RubyLLM::Message", model_id: "gpt-4o")
+      response = double("RubyLLM::Message", model: "gpt-4o")
       allow(response).to receive(:cost).and_return(extra)
 
       agent.send(:calculate_costs, response, context)
@@ -68,7 +67,7 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "cost calculation" do
 
     it "records the non-text components into metadata" do
       extra = build_cost(cache_read: 2000, cache_write: 100, thinking: 300, prices: full_prices)
-      response = double("RubyLLM::Message", model_id: "gpt-4o")
+      response = double("RubyLLM::Message", model: "gpt-4o")
       allow(response).to receive(:cost).and_return(extra)
 
       agent.send(:calculate_costs, response, context)
@@ -82,7 +81,7 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "cost calculation" do
 
     it "records no breakdown and adds nothing for an ordinary response" do
       extra = build_cost(prices: full_prices) # no cache/reasoning tokens
-      response = double("RubyLLM::Message", model_id: "gpt-4o")
+      response = double("RubyLLM::Message", model: "gpt-4o")
       allow(response).to receive(:cost).and_return(extra)
 
       agent.send(:calculate_costs, response, context)
@@ -97,7 +96,7 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "cost calculation" do
         cache_read: 2000, thinking: 300,
         prices: {input: 3.0, output: 15.0, cache_read_input: nil, cache_write_input: nil, reasoning_output: 20.0}
       )
-      response = double("RubyLLM::Message", model_id: "gpt-4o")
+      response = double("RubyLLM::Message", model: "gpt-4o")
       allow(response).to receive(:cost).and_return(extra)
 
       agent.send(:calculate_costs, response, context)
@@ -110,7 +109,7 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "cost calculation" do
 
   describe "#calculate_costs without a cost-bearing response" do
     it "prices text input/output and adds nothing" do
-      response = double("LegacyResponse", model_id: "gpt-4o")
+      response = double("LegacyResponse", model: "gpt-4o")
 
       agent.send(:calculate_costs, response, context)
 
@@ -168,7 +167,7 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "cost calculation" do
           reasoning_output: pricing.reasoning_output
         }
       )
-      response = double("RubyLLM::Message", model_id: model_id, reasoning_tokens: 300)
+      response = double("RubyLLM::Message", model: model_id, tokens: RubyLLM::Tokens.new(thinking: 300))
       allow(response).to receive(:cost).and_return(extra)
 
       reasoning_agent.send(:calculate_costs, response, reasoning_context)

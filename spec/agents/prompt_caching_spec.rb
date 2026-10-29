@@ -56,7 +56,7 @@ RSpec.describe "Anthropic prompt caching" do
       info
     end
 
-    it "wraps system prompt in Content::Raw with cache_control for Anthropic models" do
+    it "marks the system prompt as a prompt cache boundary for Anthropic models" do
       klass = Class.new(RubyLLM::Agents::Base) do
         model "claude-sonnet-4-20250514"
         system "You are a helpful assistant."
@@ -66,23 +66,13 @@ RSpec.describe "Anthropic prompt caching" do
 
       mock_client = build_mock_chat_client(response: build_mock_response(model_id: "claude-sonnet-4-20250514"))
       stub_ruby_llm_chat(mock_client)
-
-      # Track what gets passed to with_instructions
-      captured_content = nil
-      allow(mock_client).to receive(:with_instructions) do |content|
-        captured_content = content
-        mock_client
-      end
-
       allow(RubyLLM::Models).to receive(:find).and_return(claude_model_info)
 
-      klass.call
+      expect(mock_client).to receive(:with_instructions)
+        .with("You are a helpful assistant.", cache_until_here: true)
+        .and_return(mock_client)
 
-      expect(captured_content).to be_a(RubyLLM::Content::Raw)
-      blocks = captured_content.value
-      expect(blocks).to be_an(Array)
-      expect(blocks.first).to include(type: "text", text: "You are a helpful assistant.")
-      expect(blocks.first[:cache_control]).to eq({type: "ephemeral"})
+      klass.call
     end
 
     it "passes plain string for non-Anthropic models" do
@@ -138,7 +128,7 @@ RSpec.describe "Anthropic prompt caching" do
       Class.new(RubyLLM::Tool) do
         def self.name = "test_tool"
         description "A test tool"
-        param :input, type: :string, desc: "Input text"
+        parameter :input, type: :string, description: "Input text"
         def execute(input:) = "result"
       end
     end
@@ -147,7 +137,7 @@ RSpec.describe "Anthropic prompt caching" do
       Class.new(RubyLLM::Tool) do
         def self.name = "another_tool"
         description "Another test tool"
-        param :query, type: :string, desc: "Query text"
+        parameter :query, type: :string, description: "Query text"
         def execute(query:) = "result"
       end
     end
@@ -159,7 +149,7 @@ RSpec.describe "Anthropic prompt caching" do
       info
     end
 
-    it "adds cache_control to the last tool's provider_params" do
+    it "adds cache_control to the last tool's provider_options" do
       klass = Class.new(RubyLLM::Agents::Base) do
         model "claude-sonnet-4-20250514"
         system "You are a helpful assistant."
@@ -187,11 +177,14 @@ RSpec.describe "Anthropic prompt caching" do
       klass.call
 
       last_tool = tools_hash.values.last
-      expect(last_tool.provider_params).to include(cache_control: {type: "ephemeral"})
+      expect(last_tool.provider_options).to include(cache_control: {type: "ephemeral"})
 
       # First tool should NOT have cache_control
       first_tool = tools_hash.values.first
-      expect(first_tool.provider_params).not_to have_key(:cache_control)
+      expect(first_tool.provider_options).not_to have_key(:cache_control)
+
+      # The tool class itself is left untouched
+      expect(another_tool.provider_options).not_to have_key(:cache_control)
     end
 
     it "does not modify tools when cache_prompts is disabled" do
@@ -218,7 +211,60 @@ RSpec.describe "Anthropic prompt caching" do
       klass.call
 
       last_tool = tools_hash.values.last
-      expect(last_tool.provider_params).not_to have_key(:cache_control)
+      expect(last_tool.provider_options).not_to have_key(:cache_control)
+    end
+  end
+
+  describe "rendered Anthropic request" do
+    let(:llm) { RubyLLM.context { |config| config.anthropic_api_key = "test-key" } }
+    let(:real_chat) { llm.chat(model: "claude-sonnet-4-20250514", provider: :anthropic, assume_model_exists: true) }
+
+    let(:tool_classes) do
+      %w[first_lookup second_lookup].map do |tool_name|
+        Class.new(RubyLLM::Tool) do
+          define_singleton_method(:name) { tool_name }
+          description "Looks things up"
+          parameter :query, description: "Query"
+          def execute(query:) = "result"
+        end
+      end
+    end
+
+    def render_request_for(agent_class)
+      allow(RubyLLM).to receive(:chat).and_return(real_chat)
+      client = agent_class.new.send(:build_client)
+      client.add_message(role: :user, content: "Hello")
+      client.render
+    end
+
+    it "puts cache_control on the system prompt and the last tool" do
+      klass = Class.new(RubyLLM::Agents::Base) do
+        model "claude-sonnet-4-20250514"
+        system "You are a helpful assistant."
+        user "Hello"
+        cache_prompts true
+      end
+      klass.tools(*tool_classes)
+
+      payload = render_request_for(klass)
+
+      expect(payload[:system].last).to include(text: "You are a helpful assistant.", cache_control: {type: "ephemeral"})
+      expect(payload[:tools].last).to include(cache_control: {type: "ephemeral"})
+      expect(payload[:tools].first).not_to have_key(:cache_control)
+    end
+
+    it "sends no cache_control when cache_prompts is off" do
+      klass = Class.new(RubyLLM::Agents::Base) do
+        model "claude-sonnet-4-20250514"
+        system "You are a helpful assistant."
+        user "Hello"
+      end
+      klass.tools(*tool_classes)
+
+      payload = render_request_for(klass)
+
+      expect(payload[:system].last).not_to have_key(:cache_control)
+      expect(payload[:tools]).to all(satisfy { |tool| !tool.key?(:cache_control) })
     end
   end
 

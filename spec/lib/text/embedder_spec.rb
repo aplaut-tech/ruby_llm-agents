@@ -210,7 +210,7 @@ RSpec.describe RubyLLM::Agents::Embedder do
     let(:embed_response) do
       double("EmbedResponse",
         vectors: [[0.1, 0.2, 0.3]],
-        input_tokens: 5,
+        tokens: RubyLLM::Tokens.new(input: 5),
         model: "fallback-embedding-model",
         to_h: {})
     end

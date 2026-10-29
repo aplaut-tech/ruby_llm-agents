@@ -51,8 +51,8 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "usage accounting across tool loops" 
     allow(client).to receive(:with_schema).and_return(client)
     allow(client).to receive(:with_tools).and_return(client)
     allow(client).to receive(:with_thinking).and_return(client)
-    allow(client).to receive(:on_tool_call).and_return(client)
-    allow(client).to receive(:on_tool_result).and_return(client)
+    allow(client).to receive(:before_tool_call).and_return(client)
+    allow(client).to receive(:after_tool_result).and_return(client)
     allow(client).to receive(:messages) { history }
     allow(client).to receive(:ask) do
       history.concat(appended)
@@ -215,7 +215,7 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "usage accounting across tool loops" 
     # Every round re-reads the cached prefix and may reason again, so these
     # are billed per round just like plain input/output tokens.
     def round(model: "gpt-4o", **tokens)
-      RubyLLM::Message.new(role: :assistant, content: "working", model_id: model, **tokens)
+      build_real_response(content: "working", model_id: model, **tokens)
     end
 
     def run_loop(appended, error: nil)
@@ -331,6 +331,40 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "usage accounting across tool loops" 
       expect(context.output_tokens).to eq(30)
       expect(context.output).to be_a(RubyLLM::Agents::Result)
       expect(context.output.content).to eq("working")
+    end
+
+    it "sums usage across the loop for RubyLLM::Agents::Base agents too" do
+      base_agent_class = Class.new(RubyLLM::Agents::Base) do
+        def self.name
+          "BaseUsageAccountingAgent"
+        end
+
+        model "gpt-4o"
+
+        def user_prompt
+          "open Instagram"
+        end
+      end
+      base_agent = base_agent_class.new
+      base_context = RubyLLM::Agents::Pipeline::Context.new(
+        input: {},
+        agent_class: base_agent_class,
+        agent_instance: base_agent
+      )
+      client = build_looping_client(
+        [
+          assistant(input: 100, output: 10),
+          user_message,
+          assistant(input: 200, output: 20)
+        ]
+      )
+      stub_ruby_llm_chat(client)
+
+      base_agent.send(:execute, base_context)
+
+      expect(base_context.input_tokens).to eq(300)
+      expect(base_context.output_tokens).to eq(30)
+      expect(base_context[:llm_usage]).to include("requests" => 2, "last_input_tokens" => 200)
     end
   end
 end

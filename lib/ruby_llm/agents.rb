@@ -2,7 +2,7 @@
 
 require "csv"
 require "ruby_llm"
-require "ruby_llm/schema"
+require "schematist"
 
 # Core
 require_relative "agents/core/version"
@@ -89,7 +89,8 @@ require_relative "agents/eval"
 
 # Providers (extends RubyLLM with additional providers)
 require_relative "agents/providers/inception"
-RubyLLM::Provider.register :inception, RubyLLM::Agents::Providers::Inception
+RubyLLM::Provider.register :inception, RubyLLM::Agents::Providers::Inception,
+  models: RubyLLM::Agents::Providers::Inception::Registry::FILE
 
 # Rails integration
 if defined?(Rails)

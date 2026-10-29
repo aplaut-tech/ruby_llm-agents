@@ -128,7 +128,7 @@ RSpec.describe "Stream events integration" do
         end
 
         description "A test tool"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           "result: #{input}"
@@ -164,14 +164,14 @@ RSpec.describe "Stream events integration" do
       # Build a mock that triggers tool callbacks
       mock_client = build_mock_chat_client(response: build_real_response(content: "Done"))
 
-      # Capture on_tool_call and on_tool_result blocks
+      # Capture before_tool_call and after_tool_result blocks
       tool_call_block = nil
       tool_result_block = nil
-      allow(mock_client).to receive(:on_tool_call) do |&blk|
+      allow(mock_client).to receive(:before_tool_call) do |&blk|
         tool_call_block = blk
         mock_client
       end
-      allow(mock_client).to receive(:on_tool_result) do |&blk|
+      allow(mock_client).to receive(:after_tool_result) do |&blk|
         tool_result_block = blk
         mock_client
       end
@@ -213,11 +213,11 @@ RSpec.describe "Stream events integration" do
 
       tool_call_block = nil
       tool_result_block = nil
-      allow(mock_client).to receive(:on_tool_call) do |&blk|
+      allow(mock_client).to receive(:before_tool_call) do |&blk|
         tool_call_block = blk
         mock_client
       end
-      allow(mock_client).to receive(:on_tool_result) do |&blk|
+      allow(mock_client).to receive(:after_tool_result) do |&blk|
         tool_result_block = blk
         mock_client
       end

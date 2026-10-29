@@ -93,7 +93,7 @@ RSpec.describe RubyLLM::Agents::DSL::Base do
       expect(test_class.schema).to be_nil
     end
 
-    context "with block DSL (RubyLLM::Schema)" do
+    context "with block DSL (Schematist::Schema)" do
       it "sets schema from a block" do
         test_class.schema do
           string :name, description: "A name"
@@ -102,11 +102,11 @@ RSpec.describe RubyLLM::Agents::DSL::Base do
         expect(test_class.schema.properties).to include(:name)
       end
 
-      it "produces a RubyLLM::Schema subclass" do
+      it "produces a Schematist::Schema subclass" do
         test_class.schema do
           string :name
         end
-        expect(test_class.schema.ancestors).to include(RubyLLM::Schema)
+        expect(test_class.schema.ancestors).to include(Schematist::Schema)
       end
 
       it "supports multiple property types" do

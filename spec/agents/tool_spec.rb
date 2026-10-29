@@ -12,7 +12,7 @@ RSpec.describe RubyLLM::Agents::Tool do
       end
 
       description "A simple test tool"
-      param :input, desc: "Some input", required: true
+      parameter :input, description: "Some input", required: true
 
       def execute(input:)
         "got: #{input}"
@@ -29,7 +29,7 @@ RSpec.describe RubyLLM::Agents::Tool do
       description "A tool with a timeout"
       timeout 1
 
-      param :input, desc: "Some input", required: true
+      parameter :input, description: "Some input", required: true
 
       def execute(input:)
         sleep 2 if input == "slow"
@@ -45,7 +45,7 @@ RSpec.describe RubyLLM::Agents::Tool do
       end
 
       description "A tool that raises errors"
-      param :input, desc: "Some input", required: true
+      parameter :input, description: "Some input", required: true
 
       def execute(input:)
         raise "Something went wrong"
@@ -60,7 +60,7 @@ RSpec.describe RubyLLM::Agents::Tool do
       end
 
       description "A tool that reads context"
-      param :input, desc: "Some input", required: true
+      parameter :input, description: "Some input", required: true
 
       def execute(input:)
         return "no context" unless context
@@ -97,20 +97,20 @@ RSpec.describe RubyLLM::Agents::Tool do
   describe "#call" do
     it "executes the tool and returns the result" do
       tool = simple_tool_class.new
-      result = tool.call({input: "hello"})
+      result = tool.call(input: "hello")
       expect(result).to eq("got: hello")
     end
 
     it "validates required arguments via RubyLLM's validation" do
       tool = simple_tool_class.new
-      result = tool.call({})
+      result = tool.call
       expect(result).to be_a(Hash)
       expect(result[:error]).to include("missing keyword")
     end
 
     it "handles string keys in arguments" do
       tool = simple_tool_class.new
-      result = tool.call({"input" => "hello"})
+      result = tool.call(**{"input" => "hello"})
       expect(result).to eq("got: hello")
     end
   end
@@ -118,7 +118,7 @@ RSpec.describe RubyLLM::Agents::Tool do
   describe "error handling" do
     it "catches exceptions and returns error strings" do
       tool = error_tool_class.new
-      result = tool.call({input: "test"})
+      result = tool.call(input: "test")
       expect(result).to include("ERROR")
       expect(result).to include("RuntimeError")
       expect(result).to include("Something went wrong")
@@ -126,21 +126,21 @@ RSpec.describe RubyLLM::Agents::Tool do
 
     it "does not raise — errors become strings for the LLM" do
       tool = error_tool_class.new
-      expect { tool.call({input: "test"}) }.not_to raise_error
+      expect { tool.call(input: "test") }.not_to raise_error
     end
   end
 
   describe "timeout" do
     it "returns a timeout string when tool exceeds timeout" do
       tool = timeout_tool_class.new
-      result = tool.call({input: "slow"})
+      result = tool.call(input: "slow")
       expect(result).to include("TIMEOUT")
       expect(result).to include("1s")
     end
 
     it "completes normally when within timeout" do
       tool = timeout_tool_class.new
-      result = tool.call({input: "fast"})
+      result = tool.call(input: "fast")
       expect(result).to eq("got: fast")
     end
 
@@ -156,7 +156,7 @@ RSpec.describe RubyLLM::Agents::Tool do
         end
 
         description "Slow tool without explicit timeout"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           sleep 2
@@ -165,7 +165,7 @@ RSpec.describe RubyLLM::Agents::Tool do
       end
 
       tool = slow_tool_class.new
-      result = tool.call({input: "test"})
+      result = tool.call(input: "test")
       expect(result).to include("TIMEOUT")
     ensure
       RubyLLM::Agents.reset_configuration!
@@ -175,7 +175,7 @@ RSpec.describe RubyLLM::Agents::Tool do
       tool = simple_tool_class.new
       # Simple tool has no timeout, config default is nil
       # Should execute normally without any timeout
-      result = tool.call({input: "hello"})
+      result = tool.call(input: "hello")
       expect(result).to eq("got: hello")
     end
   end
@@ -183,7 +183,7 @@ RSpec.describe RubyLLM::Agents::Tool do
   describe "context accessor" do
     it "is nil when no pipeline context is set" do
       tool = context_tool_class.new
-      result = tool.call({input: "test"})
+      result = tool.call(input: "test")
       expect(result).to eq("no context")
     end
 
@@ -197,7 +197,7 @@ RSpec.describe RubyLLM::Agents::Tool do
       Thread.current[:ruby_llm_agents_caller_context] = pipeline_context
 
       tool = context_tool_class.new
-      result = tool.call({input: "test"})
+      result = tool.call(input: "test")
       expect(result).to eq("tenant:tenant_123 container:abc123")
     ensure
       Thread.current[:ruby_llm_agents_caller_context] = nil
@@ -216,7 +216,7 @@ RSpec.describe RubyLLM::Agents::Tool do
         end
 
         description "Tests hash access"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           context[:api_key].to_s
@@ -224,7 +224,7 @@ RSpec.describe RubyLLM::Agents::Tool do
       end
 
       tool = tool_class.new
-      result = tool.call({input: "test"})
+      result = tool.call(input: "test")
       expect(result).to eq("secret")
     ensure
       Thread.current[:ruby_llm_agents_caller_context] = nil
@@ -241,7 +241,7 @@ RSpec.describe RubyLLM::Agents::Tool do
         end
 
         description "Tests id access"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           context.id.to_s
@@ -249,7 +249,7 @@ RSpec.describe RubyLLM::Agents::Tool do
       end
 
       tool = tool_class.new
-      result = tool.call({input: "test"})
+      result = tool.call(input: "test")
       expect(result).to eq("42")
     ensure
       Thread.current[:ruby_llm_agents_caller_context] = nil
@@ -272,7 +272,7 @@ RSpec.describe RubyLLM::Agents::Tool do
         end
 
         description "Tests agent_type access"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           context.agent_type.to_s
@@ -280,7 +280,7 @@ RSpec.describe RubyLLM::Agents::Tool do
       end
 
       tool = tool_class.new
-      result = tool.call({input: "test"})
+      result = tool.call(input: "test")
       expect(result).to eq("TestCodingAgent")
     ensure
       Thread.current[:ruby_llm_agents_caller_context] = nil
@@ -290,7 +290,7 @@ RSpec.describe RubyLLM::Agents::Tool do
       tool = context_tool_class.new
 
       # First call without context
-      result1 = tool.call({input: "test"})
+      result1 = tool.call(input: "test")
       expect(result1).to eq("no context")
 
       # Second call with context
@@ -299,35 +299,53 @@ RSpec.describe RubyLLM::Agents::Tool do
         agent_options: {container_id: "c1"}
       )
       Thread.current[:ruby_llm_agents_caller_context] = pipeline_context
-      result2 = tool.call({input: "test"})
+      result2 = tool.call(input: "test")
       expect(result2).to eq("tenant:t1 container:c1")
 
       # Third call without context again
       Thread.current[:ruby_llm_agents_caller_context] = nil
-      result3 = tool.call({input: "test"})
+      result3 = tool.call(input: "test")
       expect(result3).to eq("no context")
     end
   end
 
-  describe "Tool::Halt passthrough" do
-    it "passes Halt results through without converting" do
-      halt_tool_class = Class.new(described_class) do
+  describe "#halt" do
+    let(:halt_tool_class) do
+      Class.new(described_class) do
         def self.name
           "HaltTool"
         end
 
         description "Returns halt"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           halt("stopping here")
+          "not reached"
         end
       end
+    end
 
+    it "raises Tool::Halt carrying the content" do
+      expect { halt_tool_class.new.halt("done") }.to raise_error(described_class::Halt) do |error|
+        expect(error.content).to eq("done")
+        expect(error.message).to eq("done")
+      end
+    end
+
+    it "keeps non-string content as given" do
+      expect { halt_tool_class.new.halt({answer: 42}) }.to raise_error(described_class::Halt) do |error|
+        expect(error.content).to eq({answer: 42})
+      end
+    end
+
+    it "is an error of the gem, not of RubyLLM" do
+      expect(described_class::Halt.ancestors).to include(RubyLLM::Agents::Error)
+    end
+
+    it "propagates out of #call instead of becoming an error string" do
       tool = halt_tool_class.new
-      result = tool.call({input: "test"})
-      expect(result).to be_a(RubyLLM::Tool::Halt)
-      expect(result.content).to eq("stopping here")
+      expect { tool.call(input: "test") }.to raise_error(described_class::Halt, "stopping here")
     end
   end
 

@@ -211,7 +211,7 @@ RSpec.describe RubyLLM::Agents::Execution::Metrics do
     let(:gpt4o_input_price) { gpt4o_info.pricing.text_tokens.input }
     let(:gpt4o_output_price) { gpt4o_info.pricing.text_tokens.output }
 
-    let(:sonnet_info) { RubyLLM::Models.find("claude-3-5-sonnet-20241022") }
+    let(:sonnet_info) { RubyLLM::Models.find("claude-sonnet-4-5") }
     let(:sonnet_input_price) { sonnet_info.pricing.text_tokens.input }
     let(:sonnet_output_price) { sonnet_info.pricing.text_tokens.output }
 
@@ -310,7 +310,7 @@ RSpec.describe RubyLLM::Agents::Execution::Metrics do
             "error_class" => "RateLimitError"
           },
           {
-            "model_id" => "claude-3-5-sonnet-20241022",
+            "model_id" => "claude-sonnet-4-5",
             "input_tokens" => 1000,
             "output_tokens" => 500
           }

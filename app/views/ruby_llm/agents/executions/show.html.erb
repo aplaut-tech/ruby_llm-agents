@@ -15,7 +15,7 @@
       when 'stop' then 'badge-success'
       when 'length' then 'badge-orange'
       when 'content_filter' then 'badge-error'
-      when 'tool_calls' then 'badge-cyan'
+      when 'tool_calls', 'halt' then 'badge-cyan'
       else 'badge-timeout'
     end
     secondary_badges << { label: @execution.finish_reason, css: finish_css }

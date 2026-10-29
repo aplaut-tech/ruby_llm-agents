@@ -32,7 +32,7 @@ RSpec.describe "cache hit side effects" do
     else
       allow(client).to receive(:ask).and_return(
         RubyLLM::Message.new(role: :assistant, content: "hello",
-          input_tokens: 100, output_tokens: 50, model_id: "gpt-4.1")
+          input_tokens: 100, output_tokens: 50, model: "gpt-4.1")
       )
     end
     allow(RubyLLM).to receive(:chat).and_return(client)
@@ -111,7 +111,7 @@ RSpec.describe "cache hit side effects" do
         block&.call(double("Chunk", content: "he"))
         block&.call(double("Chunk", content: "llo"))
         RubyLLM::Message.new(role: :assistant, content: "hello",
-          input_tokens: 10, output_tokens: 5, model_id: "gpt-4.1")
+          input_tokens: 10, output_tokens: 5, model: "gpt-4.1")
       end
     end
 

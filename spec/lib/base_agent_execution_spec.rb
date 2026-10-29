@@ -68,20 +68,25 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "execution methods" do
       expect(context.output_tokens).to eq(50)
     end
 
-    it "processes response content" do
-      hash_response = build_real_response(input_tokens: 100, output_tokens: 50)
-      hash_response.content = {"key" => "value", "number" => 42}
-      mock_chat_with_hash = build_mock_chat_client(response: hash_response)
-      stub_ruby_llm_chat(mock_chat_with_hash)
+    it "parses structured output into a symbolized hash" do
+      structured_class = Class.new(test_agent_class) do
+        schema do
+          string :key
+          integer :number
+        end
+      end
+      structured_agent = structured_class.new(query: "test query")
+      json_response = build_real_response(content: {key: "value", number: 42}.to_json)
+      stub_ruby_llm_chat(build_mock_chat_client(response: json_response))
 
       context = RubyLLM::Agents::Pipeline::Context.new(
         input: "test query",
-        agent_class: test_agent_class,
-        agent_instance: agent,
+        agent_class: structured_class,
+        agent_instance: structured_agent,
         model: "gpt-4o"
       )
 
-      agent.send(:execute, context)
+      structured_agent.send(:execute, context)
 
       # Hash keys should be symbolized
       expect(context.output.content).to eq({key: "value", number: 42})
@@ -403,24 +408,64 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "execution methods" do
       expect(context.model_used).to eq("gpt-4o")
     end
 
-    it "sets finish_reason to nil for real Message (which lacks finish_reason)" do
+    it "records the Message's finish reason in the executions' vocabulary" do
       agent.send(:capture_response, response, context)
-
-      # Real RubyLLM::Message does not have finish_reason — the respond_to? guard returns nil
-      expect(context.finish_reason).to be_nil
-    end
-
-    it "captures finish_reason when the response object supports it" do
-      response_with_finish = Struct.new(:input_tokens, :output_tokens, :model_id, :finish_reason)
-        .new(100, 50, "gpt-4o", "stop")
-
-      agent.send(:capture_response, response_with_finish, context)
 
       expect(context.finish_reason).to eq("stop")
     end
 
-    context "when response is a RubyLLM::Tool::Halt" do
-      let(:halt) { RubyLLM::Tool::Halt.new("stopped via halt") }
+    it "captures finish_reason from any response object that reports one" do
+      response_with_finish = Struct.new(:tokens, :model, :finish_reason)
+        .new(build_tokens(input: 100, output: 50), "gpt-4o", "stop")
+
+      agent.send(:capture_response, response_with_finish, context)
+
+      expect(context.finish_reason).to eq("stop")
+      expect(context.input_tokens).to eq(100)
+    end
+
+    [
+      [:stop, "stop"],
+      [:max_tokens, "length"],
+      [:tool_calls, "tool_calls"],
+      [:content_filter, "content_filter"],
+      [:pause_turn, "other"],
+      ["end_turn", "stop"],
+      ["length", "length"],
+      ["tool_use", "tool_calls"],
+      ["safety", "content_filter"]
+    ].each do |reported, recorded|
+      it "maps a #{reported.inspect} finish reason to #{recorded.inspect}" do
+        message = build_real_response(finish_reason: reported)
+
+        agent.send(:capture_response, message, context)
+
+        expect(context.finish_reason).to eq(recorded)
+        expect(RubyLLM::Agents::Execution::FINISH_REASONS).to include(recorded)
+      end
+    end
+
+    it "leaves finish_reason nil when the response reports none" do
+      agent.send(:capture_response, build_real_response(finish_reason: nil), context)
+
+      expect(context.finish_reason).to be_nil
+    end
+
+    it "reads cache and model data from the RubyLLM 2 usage" do
+      message = build_real_response(
+        input_tokens: 100, output_tokens: 50, cached_tokens: 400, cache_creation_tokens: 20,
+        model_id: "gpt-4o-2024-08-06"
+      )
+
+      agent.send(:capture_response, message, context)
+
+      expect(context.cached_tokens).to eq(400)
+      expect(context.cache_creation_tokens).to eq(20)
+      expect(context.model_used).to eq("gpt-4o-2024-08-06")
+    end
+
+    context "when response is a RubyLLM::Agents::Tool::Halt" do
+      let(:halt) { RubyLLM::Agents::Tool::Halt.new("stopped via halt") }
 
       it "does not raise NoMethodError on input_tokens" do
         expect {
@@ -674,13 +719,60 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "execution methods" do
     end
 
     it "deep symbolizes hash keys" do
-      hash_response = build_real_response(content: "placeholder")
-      hash_response.content = {"key" => "value", "nested" => {"inner" => "data"}}
+      hash_response = double("Response", content: {"key" => "value", "nested" => {"inner" => "data"}})
 
       result = agent.send(:process_response, hash_response)
 
       expect(result[:key]).to eq("value")
       expect(result[:nested]).to eq({inner: "data"}) # All keys deeply symbolized
+    end
+
+    context "with a schema" do
+      let(:structured_agent) do
+        Class.new(test_agent_class) do
+          schema do
+            string :key
+          end
+        end.new(query: "test query")
+      end
+
+      it "parses the JSON RubyLLM leaves in the content" do
+        response = build_real_response(content: {key: "value", nested: {inner: "data"}}.to_json)
+
+        result = structured_agent.send(:process_response, response)
+
+        expect(result).to eq({key: "value", nested: {inner: "data"}})
+      end
+
+      it "parses JSON content of responses without #parsed" do
+        response = double("Response", content: '{"key":"value"}')
+
+        expect(structured_agent.send(:process_response, response)).to eq({key: "value"})
+      end
+
+      it "returns content that is not valid JSON as is" do
+        response = build_real_response(content: "Sorry, I can't do that")
+
+        expect(structured_agent.send(:process_response, response)).to eq("Sorry, I can't do that")
+      end
+
+      it "returns JSON arrays without symbolizing them" do
+        response = build_real_response(content: '[{"key":"value"}]')
+
+        expect(structured_agent.send(:process_response, response)).to eq([{"key" => "value"}])
+      end
+
+      it "returns empty content as is" do
+        response = build_real_response(content: "")
+
+        expect(structured_agent.send(:process_response, response)).to eq("")
+      end
+    end
+
+    it "does not parse JSON-looking content without a schema" do
+      response = build_real_response(content: '{"key":"value"}')
+
+      expect(agent.send(:process_response, response)).to eq('{"key":"value"}')
     end
   end
 
@@ -705,8 +797,8 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "execution methods" do
       expect(result).not_to have_key(:thinking_tokens)
     end
 
-    it "handles hash-based thinking" do
-      response = build_real_response(thinking: {text: "thinking text", signature: "sig123", tokens: 500})
+    it "handles hash-based thinking, with the token count from the usage" do
+      response = build_real_response(thinking: {text: "thinking text", signature: "sig123"}, thinking_tokens: 500)
 
       result = agent.send(:result_thinking_data, response)
 

@@ -420,6 +420,9 @@ module RubyLLM
         }
       end
 
+      SUBTITLE_FORMATS = %w[srt vtt].freeze
+      private_constant :SUBTITLE_FORMATS
+
       # Builds options for RubyLLM.transcribe
       #
       # @param model [String] Model to use
@@ -435,22 +438,27 @@ module RubyLLM
         prompt_text = prompt
         options[:prompt] = prompt_text if prompt_text
 
-        # Add format-specific options
+        # Add format-specific options (RubyLLM's format: takes the
+        # provider's own response format name)
         case self.class.output_format
         when :verbose_json
-          options[:response_format] = "verbose_json"
+          options[:format] = "verbose_json"
         when :srt
-          options[:response_format] = "srt"
+          options[:format] = "srt"
         when :vtt
-          options[:response_format] = "vtt"
+          options[:format] = "vtt"
         end
 
-        # Add timestamp granularity
-        case self.class.include_timestamps
-        when :word
-          options[:timestamp_granularities] = ["word", "segment"]
-        when :segment
-          options[:timestamp_granularities] = ["segment"]
+        # Add timestamp granularity. RubyLLM requests timestamps with a
+        # verbose_json response, so the subtitle formats, which carry their
+        # own timing, go without.
+        unless SUBTITLE_FORMATS.include?(options[:format])
+          case self.class.include_timestamps
+          when :word
+            options[:timestamps] = %i[word segment]
+          when :segment
+            options[:timestamps] = %i[segment]
+          end
         end
 
         options

@@ -10,7 +10,7 @@ RSpec.describe "Tool concurrency DSL" do
       end
 
       description "A tool"
-      param :input, desc: "Input", required: true
+      parameter :input, description: "Input", required: true
 
       def execute(input:)
         "ok: #{input}"
@@ -64,7 +64,7 @@ RSpec.describe "Tool concurrency DSL" do
       agent.send(:build_client, ctx)
     end
 
-    it "passes the configured concurrency to with_tools" do
+    it "passes the configured concurrency to with_tool_options" do
       tc = tool_class
       agent_class = Class.new(RubyLLM::Agents::BaseAgent) do
         def self.name
@@ -78,12 +78,32 @@ RSpec.describe "Tool concurrency DSL" do
 
       mock = build_mock_chat_client
       stub_ruby_llm_chat(mock)
-      expect(mock).to receive(:with_tools).with(tc, concurrency: :threads).and_return(mock)
+      expect(mock).to receive(:with_tools).with(tc).and_return(mock)
+      expect(mock).to receive(:with_tool_options).with(concurrency: :threads).and_return(mock)
 
       build_client_for(agent_class)
     end
 
-    it "omits the concurrency keyword when the agent does not configure it" do
+    it "passes false through so the agent runs tools sequentially" do
+      tc = tool_class
+      agent_class = Class.new(RubyLLM::Agents::BaseAgent) do
+        def self.name
+          "SequentialToolAgent"
+        end
+
+        model "gpt-4o"
+        tools tc
+        tool_concurrency false
+      end
+
+      mock = build_mock_chat_client
+      stub_ruby_llm_chat(mock)
+      expect(mock).to receive(:with_tool_options).with(concurrency: false).and_return(mock)
+
+      build_client_for(agent_class)
+    end
+
+    it "leaves concurrency to RubyLLM's default when the agent does not configure it" do
       tc = tool_class
       agent_class = Class.new(RubyLLM::Agents::BaseAgent) do
         def self.name
@@ -97,6 +117,7 @@ RSpec.describe "Tool concurrency DSL" do
       mock = build_mock_chat_client
       stub_ruby_llm_chat(mock)
       expect(mock).to receive(:with_tools).with(tc).and_return(mock)
+      expect(mock).not_to receive(:with_tool_options)
 
       build_client_for(agent_class)
     end

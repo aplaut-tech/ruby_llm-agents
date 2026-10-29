@@ -352,7 +352,7 @@ module RubyLLM
 
         {
           vectors: vectors,
-          input_tokens: response.input_tokens,
+          input_tokens: embedding_input_tokens(response),
           model: response.model,
           cost: calculate_cost(response)
         }
@@ -410,11 +410,19 @@ module RubyLLM
         return response.input_cost if response.respond_to?(:input_cost) && response.input_cost
 
         # Look up pricing from the model registry (same approach as BaseAgent)
-        tokens = response.input_tokens || 0
+        tokens = embedding_input_tokens(response) || 0
         model_id = response.model.to_s
 
         input_price = find_embedding_price(model_id)
         (tokens / 1_000_000.0) * input_price
+      end
+
+      # Input tokens an embedding response reports (RubyLLM::Embedding#tokens).
+      #
+      # @param response [Object] The ruby_llm embedding response
+      # @return [Integer, nil]
+      def embedding_input_tokens(response)
+        response.tokens&.input
       end
 
       # Looks up the per-million-token input price for an embedding model

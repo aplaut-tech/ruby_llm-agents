@@ -73,12 +73,12 @@ RSpec.describe "cost calculation correctness", type: :model do
     RubyLLM::Message.new(
       role: :assistant,
       content: "ok",
-      model_id: model_id,
+      model: model_id,
       input_tokens: input_tokens,
       output_tokens: output_tokens,
-      cached_tokens: cached_tokens,
-      cache_creation_tokens: cache_creation_tokens,
-      reasoning_tokens: reasoning_tokens
+      cache_read_tokens: cached_tokens,
+      cache_write_tokens: cache_creation_tokens,
+      thinking_tokens: reasoning_tokens
     )
   end
 
@@ -92,18 +92,22 @@ RSpec.describe "cost calculation correctness", type: :model do
     p = sonar
     tokens = RubyLLM::Tokens.new(
       input: 1, output: 1,
-      cached: cache_read, cache_creation: cache_write, thinking: thinking
+      cache_read: cache_read, cache_write: cache_write, thinking: thinking
     )
-    text = Struct.new(
-      :input, :output, :cache_read_input, :cache_write_input, :reasoning_output,
-      keyword_init: true
-    ).new(
-      input: p.input, output: p.output,
-      cache_read_input: p.cache_read_input, cache_write_input: p.cache_write_input,
-      reasoning_output: p.reasoning_output
+    model = RubyLLM::Model.new(
+      id: "sonar-pricing-fixture",
+      provider: "perplexity",
+      pricing: {
+        text_tokens: {
+          standard: {
+            input_per_million: p.input, output_per_million: p.output,
+            cache_read_input_per_million: p.cache_read_input,
+            cache_write_input_per_million: p.cache_write_input,
+            reasoning_output_per_million: p.reasoning_output
+          }.compact
+        }
+      }
     )
-    pricing = Struct.new(:text_tokens).new(text)
-    model = Struct.new(:pricing).new(pricing)
     RubyLLM::Cost.new(tokens: tokens, model: model)
   end
 
@@ -111,7 +115,7 @@ RSpec.describe "cost calculation correctness", type: :model do
   # depend on so a registry change that invalidates the math fails loudly
   # here instead of silently weakening the assertions below.
   let(:gpt4o) { RubyLLM::Models.find("gpt-4o").pricing.text_tokens }
-  let(:haiku) { RubyLLM::Models.find("claude-3-5-haiku-20241022").pricing.text_tokens }
+  let(:haiku) { RubyLLM::Models.find("claude-haiku-4-5").pricing.text_tokens }
   let(:sonar) { RubyLLM::Models.find("perplexity/sonar-deep-research").pricing.text_tokens }
 
   it "registry pricing matches the fixtures this spec's arithmetic relies on" do
@@ -121,11 +125,11 @@ RSpec.describe "cost calculation correctness", type: :model do
     expect(gpt4o.cache_read_input).to eq(1.25)
     expect(gpt4o.cache_write_input).to be_nil
 
-    # claude-3-5-haiku: full cache pricing.
-    expect(haiku.input).to eq(0.8)
-    expect(haiku.output).to eq(4)
-    expect(haiku.cache_read_input).to eq(0.08)
-    expect(haiku.cache_write_input).to eq(1)
+    # claude-haiku-4-5: full cache pricing.
+    expect(haiku.input).to eq(1)
+    expect(haiku.output).to eq(5)
+    expect(haiku.cache_read_input).to eq(0.1)
+    expect(haiku.cache_write_input).to eq(1.25)
 
     # perplexity/sonar-deep-research: reasoning priced apart from output.
     expect(sonar.input).to eq(2)
@@ -195,26 +199,26 @@ RSpec.describe "cost calculation correctness", type: :model do
   end
 
   # ---------------------------------------------------------------------------
-  # (3) CACHE READ + WRITE — claude-3-5-haiku, in=1000 out=500 cached=2000 creation=800
-  #   input       = 1000/1e6 * 0.8 = 0.0008
-  #   output      =  500/1e6 * 4   = 0.002
-  #   cache_read  = 2000/1e6 * 0.08 = 0.00016  (round6 -> 0.00016)
-  #   cache_write =  800/1e6 * 1.0  = 0.0008   (round6 -> 0.0008)
-  #   total       = round6(0.0008 + 0.002 + 0.00016 + 0.0008) = 0.00376
+  # (3) CACHE READ + WRITE — claude-haiku-4-5, in=1000 out=500 cached=2000 creation=800
+  #   input       = 1000/1e6 * 1    = 0.001
+  #   output      =  500/1e6 * 5    = 0.0025
+  #   cache_read  = 2000/1e6 * 0.1  = 0.0002   (round6 -> 0.0002)
+  #   cache_write =  800/1e6 * 1.25 = 0.001    (round6 -> 0.001)
+  #   total       = round6(0.001 + 0.0025 + 0.0002 + 0.001) = 0.0047
   # ---------------------------------------------------------------------------
   describe "(3) cache read + write" do
     it "adds both cache components at their own rates" do
-      agent = agent_for("claude-3-5-haiku-20241022")
+      agent = agent_for("claude-haiku-4-5")
       ctx = context_for(agent, input_tokens: 1000, output_tokens: 500)
-      resp = message(model_id: "claude-3-5-haiku-20241022", input_tokens: 1000,
+      resp = message(model_id: "claude-haiku-4-5", input_tokens: 1000,
         output_tokens: 500, cached_tokens: 2000, cache_creation_tokens: 800)
 
       agent.send(:calculate_costs, resp, ctx)
 
-      expect(ctx.input_cost).to be_within(1e-12).of(0.0008)
-      expect(ctx.output_cost).to be_within(1e-12).of(0.002)
-      expect(ctx[:cost_breakdown]).to eq(cache_read: 0.00016, cache_write: 0.0008)
-      expect(ctx.total_cost).to eq(0.00376)
+      expect(ctx.input_cost).to be_within(1e-12).of(0.001)
+      expect(ctx.output_cost).to be_within(1e-12).of(0.0025)
+      expect(ctx[:cost_breakdown]).to eq(cache_read: 0.0002, cache_write: 0.001)
+      expect(ctx.total_cost).to eq(0.0047)
     end
   end
 
@@ -240,7 +244,7 @@ RSpec.describe "cost calculation correctness", type: :model do
         input_tokens: 1000, output_tokens: 500, reasoning_tokens: 300)
 
       # Sanity: the real message reports 300 reasoning tokens.
-      expect(resp.reasoning_tokens).to eq(300)
+      expect(resp.tokens.thinking).to eq(300)
 
       agent.send(:calculate_costs, resp, ctx)
 
@@ -260,7 +264,7 @@ RSpec.describe "cost calculation correctness", type: :model do
       agent = agent_for("perplexity/sonar-deep-research")
       ctx = context_for(agent, input_tokens: 1000, output_tokens: 500)
       resp = double("RubyLLM::Message",
-        model_id: "perplexity/sonar-deep-research", reasoning_tokens: 300)
+        model: "perplexity/sonar-deep-research", tokens: RubyLLM::Tokens.new(thinking: 300))
       allow(resp).to receive(:cost).and_return(perplexity_cost(thinking: 300))
 
       agent.send(:calculate_costs, resp, ctx)
@@ -283,7 +287,7 @@ RSpec.describe "cost calculation correctness", type: :model do
       agent = agent_for("perplexity/sonar-deep-research")
       ctx = context_for(agent, input_tokens: 1000, output_tokens: 500)
       resp = double("RubyLLM::Message",
-        model_id: "perplexity/sonar-deep-research", reasoning_tokens: 300)
+        model: "perplexity/sonar-deep-research", tokens: RubyLLM::Tokens.new(thinking: 300))
       allow(resp).to receive(:cost).and_raise(StandardError.new("pricing shape unsupported"))
 
       agent.send(:calculate_costs, resp, ctx)
@@ -431,7 +435,7 @@ RSpec.describe "cost calculation correctness", type: :model do
       # before_save derives it from the components.
       ex = build(
         :execution,
-        model_id: "claude-3-5-haiku-20241022",
+        model_id: "claude-haiku-4-5",
         input_tokens: 1000,
         output_tokens: 500,
         input_cost: 0.0008,
@@ -453,7 +457,7 @@ RSpec.describe "cost calculation correctness", type: :model do
       explicit_total = 0.00376 # e.g. the (3) claude figure incl. cache components
       ex = build(
         :execution,
-        model_id: "claude-3-5-haiku-20241022",
+        model_id: "claude-haiku-4-5",
         input_tokens: 1000,
         output_tokens: 500,
         input_cost: 0.0008,
@@ -493,15 +497,15 @@ RSpec.describe "cost calculation correctness", type: :model do
       # Drive the real pipeline cost calc, then persist its full total (which
       # already includes cache components) explicitly so it is preserved, and
       # confirm the model's stored total reconciles with the pipeline's.
-      agent = agent_for("claude-3-5-haiku-20241022")
+      agent = agent_for("claude-haiku-4-5")
       ctx = context_for(agent, input_tokens: 1000, output_tokens: 500)
-      resp = message(model_id: "claude-3-5-haiku-20241022", input_tokens: 1000,
+      resp = message(model_id: "claude-haiku-4-5", input_tokens: 1000,
         output_tokens: 500, cached_tokens: 2000, cache_creation_tokens: 800)
       agent.send(:calculate_costs, resp, ctx)
 
       ex = build(
         :execution,
-        model_id: "claude-3-5-haiku-20241022",
+        model_id: "claude-haiku-4-5",
         input_tokens: 1000,
         output_tokens: 500,
         input_cost: ctx.input_cost,
@@ -511,10 +515,10 @@ RSpec.describe "cost calculation correctness", type: :model do
       ex.save!
       ex.reload
 
-      # The pipeline's cache-aware total (0.00376) is persisted as-is, not
-      # collapsed to the text-only input + output sum (0.0028).
-      expect(ctx.total_cost).to eq(0.00376)
-      expect(ex.total_cost).to eq(BigDecimal("0.00376"))
+      # The pipeline's cache-aware total (0.0047) is persisted as-is, not
+      # collapsed to the text-only input + output sum (0.0035).
+      expect(ctx.total_cost).to eq(0.0047)
+      expect(ex.total_cost).to eq(BigDecimal("0.0047"))
       expect(ex.total_cost.to_f).to be_within(1e-9).of(ctx.total_cost)
     end
   end

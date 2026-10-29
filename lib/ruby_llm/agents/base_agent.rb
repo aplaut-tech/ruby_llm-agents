@@ -451,7 +451,7 @@ module RubyLLM
       # Delegates to the class-level schema DSL by default.
       # Override in subclass instances to customize per-instance.
       #
-      # @return [RubyLLM::Schema, nil] Schema definition, or nil for free-form
+      # @return [Class, Hash, nil] Schema definition (Schematist::Schema subclass or Hash), or nil for free-form
       def schema
         self.class.schema
       end
@@ -465,10 +465,16 @@ module RubyLLM
 
       # Post-processes the LLM response
       #
+      # With a schema, the JSON the model returned is parsed (RubyLLM 2
+      # leaves Message#content as a string and parses it in
+      # Message#parsed); content that isn't valid JSON is returned as is.
+      # Hash content comes back with symbolized keys.
+      #
       # @param response [RubyLLM::Message] The raw response from the LLM
       # @return [Object] The processed result
       def process_response(response)
         content = response.content
+        content = parse_structured_content(response) if schema && content.is_a?(String)
         return content unless content.is_a?(Hash)
 
         content.deep_symbolize_keys
@@ -723,6 +729,18 @@ module RubyLLM
         end
       end
 
+      # Parses the JSON content of a structured-output response.
+      #
+      # @param response [RubyLLM::Message] The response
+      # @return [Object] The parsed JSON, or the raw content when it is
+      #   empty or not valid JSON
+      def parse_structured_content(response)
+        parsed = response.respond_to?(:parsed) ? response.parsed : JSON.parse(response.content)
+        parsed.nil? ? response.content : parsed
+      rescue JSON::ParserError
+        response.content
+      end
+
       # Resolves a prompt from DSL configuration (template string)
       #
       # Interpolates {placeholder} patterns with parameter values.
@@ -756,7 +774,6 @@ module RubyLLM
       def execute(context)
         @context = context
         client = build_client(context)
-        @client = client
 
         # Make context available to Tool instances during tool execution
         previous_context = Thread.current[:ruby_llm_agents_caller_context]
@@ -798,24 +815,22 @@ module RubyLLM
         use_prompt_caching = self.class.cache_prompts && anthropic_model?(effective_model)
 
         if system_prompt
-          sys_content = if use_prompt_caching
-            RubyLLM::Providers::Anthropic::Content.new(system_prompt, cache: true)
+          # A cached system prompt is marked as an explicit prompt cache
+          # boundary (Anthropic cache_control on its last block).
+          client = if use_prompt_caching
+            client.with_instructions(system_prompt, cache_until_here: true)
           else
-            system_prompt
+            client.with_instructions(system_prompt)
           end
-          client = client.with_instructions(sys_content)
         end
 
         client = client.with_schema(schema) if schema
         if resolved_tools.any?
-          # Only pass concurrency when the agent overrides it; otherwise let
+          client = client.with_tools(*resolved_tools)
+          # Only override concurrency when the agent sets it; otherwise let
           # RubyLLM apply its globally configured tool_concurrency default.
           concurrency = self.class.tool_concurrency
-          client = if concurrency.nil?
-            client.with_tools(*resolved_tools)
-          else
-            client.with_tools(*resolved_tools, concurrency: concurrency)
-          end
+          client = client.with_tool_options(concurrency: concurrency) unless concurrency.nil?
         end
         apply_tool_prompt_caching(client) if use_prompt_caching && resolved_tools.any?
         client = setup_tool_tracking(client) if resolved_tools.any?
@@ -828,7 +843,7 @@ module RubyLLM
       # Executes the LLM call
       #
       # When an assistant prefill is defined, messages are added manually
-      # (user, then assistant) before calling complete, so the model
+      # (user, then assistant) before requesting a completion, so the model
       # continues from the prefill. Otherwise, uses the standard .ask flow.
       #
       # The client history is baselined before the call so usage accounting
@@ -838,10 +853,16 @@ module RubyLLM
       # the usage billed up to that point is recovered onto the context
       # before the error propagates, instead of being discarded.
       #
+      # A tool that calls Tool#halt ends the loop: the Tool::Halt it raises
+      # is returned in place of a response (see #capture_response), so the
+      # halt message becomes the result and the rounds already billed are
+      # still accounted.
+      #
       # @param client [RubyLLM::Chat] The configured client
       # @param context [Pipeline::Context] The execution context
-      # @return [RubyLLM::Message] The response
+      # @return [RubyLLM::Message, Tool::Halt] The response, or the halt
       def execute_llm_call(client, context)
+        @client = client
         @usage_history_baseline = history_size(client)
 
         timeout = self.class.timeout
@@ -858,6 +879,9 @@ module RubyLLM
             client.ask(user_prompt, **ask_opts)
           end
         end
+      rescue RubyLLM::Agents::Tool::Halt => halt
+        settle_halted_tool_call(halt)
+        halt
       rescue
         recover_usage_from_history(context)
         raise
@@ -865,40 +889,24 @@ module RubyLLM
 
       # Executes with assistant prefill
       #
-      # Manually adds the user message and assistant prefill, then calls
-      # complete so the model continues from the prefill text.
+      # Adds the user message and the assistant prefill, then requests a
+      # completion so the model continues from the prefill text. RubyLLM's
+      # #complete treats a trailing assistant message as an answered turn
+      # and returns it without a request, so the first completion is
+      # requested with #generate; tool calls it asks for then run through
+      # the regular #complete loop.
       #
       # @param client [RubyLLM::Chat] The client
       # @param context [Pipeline::Context] The context
       # @param prefill [Hash] The assistant prefill message ({role:, content:})
       # @return [RubyLLM::Message] The response
       def execute_with_prefill(client, context, prefill)
-        # Add user message — use .ask for attachment support, then add prefill
-        # We use add_message + complete instead of .ask so we can insert the
-        # assistant prefill between user and completion
         client.add_message(role: :user, content: user_prompt)
         client.add_message(**prefill)
 
-        if streaming_enabled? && context.stream_block
-          first_chunk_at = nil
-          started_at = context.started_at || Time.current
-
-          response = client.complete do |chunk|
-            first_chunk_at ||= Time.current
-            if context.stream_events?
-              context.stream_block.call(StreamEvent.new(:chunk, {content: chunk.content}))
-            else
-              context.stream_block.call(chunk)
-            end
-          end
-
-          if first_chunk_at
-            context.time_to_first_token_ms = ((first_chunk_at - started_at) * 1000).to_i
-          end
-
-          response
-        else
-          client.complete
+        stream_to_caller(context) do |on_chunk|
+          response = client.generate(&on_chunk)
+          response.tool_call? ? client.complete(&on_chunk) : response
         end
       end
 
@@ -908,12 +916,27 @@ module RubyLLM
       # @param context [Pipeline::Context] The context
       # @return [RubyLLM::Message] The response
       def execute_with_streaming(client, context)
-        first_chunk_at = nil
-        started_at = context.started_at || Time.current
         ask_opts = {}
         ask_opts[:with] = @options[:with] if @options[:with]
 
-        response = client.ask(user_prompt, **ask_opts) do |chunk|
+        stream_to_caller(context) do |on_chunk|
+          client.ask(user_prompt, **ask_opts, &on_chunk)
+        end
+      end
+
+      # Yields a chunk handler that forwards chunks to the caller's stream
+      # block (as StreamEvents when requested) and records time to first
+      # token. Yields nil when streaming is off, so the call runs unstreamed.
+      #
+      # @param context [Pipeline::Context] The context
+      # @yieldparam on_chunk [Proc, nil] Block to pass to the RubyLLM call
+      # @return [Object] The block's return value
+      def stream_to_caller(context)
+        return yield(nil) unless streaming_enabled? && context.stream_block
+
+        first_chunk_at = nil
+        started_at = context.started_at || Time.current
+        on_chunk = proc do |chunk|
           first_chunk_at ||= Time.current
           if context.stream_events?
             context.stream_block.call(StreamEvent.new(:chunk, {content: chunk.content}))
@@ -922,53 +945,45 @@ module RubyLLM
           end
         end
 
+        response = yield(on_chunk)
         if first_chunk_at
           context.time_to_first_token_ms = ((first_chunk_at - started_at) * 1000).to_i
         end
-
         response
       end
 
+      # Maps provider and RubyLLM finish reasons onto the values executions
+      # record (Execution::FINISH_REASONS). RubyLLM 2 reports :stop,
+      # :max_tokens, :tool_calls and :content_filter, and passes anything
+      # else through as the provider spelled it.
+      FINISH_REASON_MAP = {
+        "stop" => "stop", "end_turn" => "stop", "stop_sequence" => "stop", "completed" => "stop",
+        "length" => "length", "max_tokens" => "length", "max_output_tokens" => "length",
+        "tool_calls" => "tool_calls", "tool_use" => "tool_calls", "function_call" => "tool_calls",
+        "content_filter" => "content_filter", "safety" => "content_filter", "refusal" => "content_filter"
+      }.freeze
+      private_constant :FINISH_REASON_MAP
+
       # Captures response metadata to the context
       #
-      # When a tool returns RubyLLM::Tool::Halt, the response is a Halt
-      # instance with no token metadata. In that case we pull metadata from
-      # the last assistant message in the client's history.
+      # When a tool halts the loop, the response is the Tool::Halt, which
+      # carries no usage. In that case metadata comes from the last
+      # assistant message in the client's history and the finish reason
+      # is "halt".
       #
-      # @param response [RubyLLM::Message, RubyLLM::Tool::Halt] The response
+      # @param response [RubyLLM::Message, Tool::Halt] The response
       # @param context [Pipeline::Context] The context
       def capture_response(response, context)
-        is_halt = response.is_a?(RubyLLM::Tool::Halt)
+        is_halt = response.is_a?(RubyLLM::Agents::Tool::Halt)
         metadata = is_halt ? last_assistant_message_from_client : response
 
         if metadata
-          context.input_tokens = metadata.input_tokens if metadata.respond_to?(:input_tokens)
-          context.output_tokens = metadata.output_tokens if metadata.respond_to?(:output_tokens)
-          context.model_used = (metadata.respond_to?(:model_id) && metadata.model_id) || model
-
-          # Prompt-cache metrics. Every provider that reports them lands here —
-          # not just Anthropic: OpenAI caches automatically with no opt-in, so
-          # these are populated on ordinary calls with a long stable prefix.
-          # Kept on the context's own accessors (and mirrored into metadata for
-          # backward compatibility) because #build_result and #calculate_costs
-          # both read them back.
-          if metadata.respond_to?(:cached_tokens) && metadata.cached_tokens&.positive?
-            context.cached_tokens = metadata.cached_tokens
-            context[:cached_tokens] = metadata.cached_tokens
-          end
-          if metadata.respond_to?(:cache_creation_tokens) && metadata.cache_creation_tokens&.positive?
-            context.cache_creation_tokens = metadata.cache_creation_tokens
-            context[:cache_creation_tokens] = metadata.cache_creation_tokens
-          end
+          record_response_usage(metadata, context)
         else
           context.model_used = model
         end
 
-        context.finish_reason = if is_halt
-          "halt"
-        elsif response.respond_to?(:finish_reason)
-          response.finish_reason
-        end
+        context.finish_reason = is_halt ? "halt" : normalize_finish_reason(response)
 
         # Store tracked tool calls in context for instrumentation
         context[:tool_calls] = @tracked_tool_calls if @tracked_tool_calls.any?
@@ -981,19 +996,94 @@ module RubyLLM
         accumulate_attempt_usage(context)
       end
 
+      # Copies a response's token usage and model onto the context.
+      #
+      # Prompt-cache metrics: every provider that reports them lands here —
+      # not just Anthropic: OpenAI caches automatically with no opt-in, so
+      # these are populated on ordinary calls with a long stable prefix.
+      # Kept on the context's own accessors (and mirrored into metadata for
+      # backward compatibility) because #build_result and #calculate_costs
+      # both read them back.
+      #
+      # @param response [RubyLLM::Message] The response
+      # @param context [Pipeline::Context] The context
+      def record_response_usage(response, context)
+        tokens = response_tokens(response)
+        if tokens
+          context.input_tokens = tokens.input
+          context.output_tokens = tokens.output
+
+          if tokens.cache_read&.positive?
+            context.cached_tokens = tokens.cache_read
+            context[:cached_tokens] = tokens.cache_read
+          end
+          if tokens.cache_write&.positive?
+            context.cache_creation_tokens = tokens.cache_write
+            context[:cache_creation_tokens] = tokens.cache_write
+          end
+        end
+
+        context.model_used = response_model_id(response) || model
+      end
+
+      # @param response [Object] The response
+      # @return [RubyLLM::Tokens, nil] The response's token usage
+      def response_tokens(response)
+        response.tokens if response.respond_to?(:tokens)
+      end
+
+      # @param response [Object] The response
+      # @return [String, nil] The model the provider says answered
+      def response_model_id(response)
+        response.model if response.respond_to?(:model)
+      end
+
+      # @param response [Object] The response
+      # @return [String, nil] One of Execution::FINISH_REASONS, or nil when
+      #   the response reports none
+      def normalize_finish_reason(response)
+        return nil unless response.respond_to?(:finish_reason)
+
+        reason = response.finish_reason
+        return nil if reason.nil?
+
+        FINISH_REASON_MAP.fetch(reason.to_s.downcase, "other")
+      end
+
+      # Completes tracking for the tool call that halted the loop: RubyLLM
+      # never reaches its after_tool_result callback, so the tracked call
+      # and the :tool_end stream event are finished here.
+      #
+      # @param halt [Tool::Halt] The halt raised by the tool
+      def settle_halted_tool_call(halt)
+        return unless @pending_tool_call
+
+        end_data = tool_call_end_data(halt)
+        complete_tool_call_tracking(halt)
+        emit_stream_event(:tool_end, end_data)
+      end
+
       # Finds the most recent assistant message with usage metadata in
       # the active client's history. Used to recover token/model metadata
-      # when the LLM call short-circuits via Tool::Halt.
+      # when a tool halts the loop.
       #
       # @return [RubyLLM::Message, nil]
       def last_assistant_message_from_client
         messages = @client&.messages
         return nil unless messages
 
-        messages.reverse_each.find do |m|
-          m.respond_to?(:role) && m.role == :assistant &&
-            m.respond_to?(:input_tokens) && m.input_tokens
-        end
+        messages.reverse_each.find { |message| billed_response?(message) }
+      end
+
+      # Whether a history entry is an assistant response the provider
+      # billed (it reports input usage). Seeded conversation history and
+      # prefills carry no usage.
+      #
+      # @param message [Object] A client history entry
+      # @return [Boolean]
+      def billed_response?(message)
+        message.respond_to?(:role) && message.role == :assistant &&
+          !response_tokens(message)&.input.nil?
       end
 
       # Recovers the usage billed by this attempt when the LLM call raised
@@ -1040,28 +1130,26 @@ module RubyLLM
         return if billed.empty?
 
         last = billed.last
-        counters = %i[input_tokens output_tokens cached_tokens cache_creation_tokens thinking_tokens]
-        totals = counters.to_h do |counter|
-          [counter, billed.sum { |message| message.public_send(counter).to_i }]
-        end
+        last_tokens = response_tokens(last)
+        totals = RubyLLM::Tokens.aggregate(billed.map { |message| response_tokens(message) })
 
-        context.input_tokens = totals[:input_tokens]
-        context.output_tokens = totals[:output_tokens]
-        if totals[:cached_tokens].positive?
-          context.cached_tokens = totals[:cached_tokens]
-          context[:cached_tokens] = totals[:cached_tokens]
+        context.input_tokens = totals.input.to_i
+        context.output_tokens = totals.output.to_i
+        if totals.cache_read.to_i.positive?
+          context.cached_tokens = totals.cache_read
+          context[:cached_tokens] = totals.cache_read
         end
-        if totals[:cache_creation_tokens].positive?
-          context.cache_creation_tokens = totals[:cache_creation_tokens]
-          context[:cache_creation_tokens] = totals[:cache_creation_tokens]
+        if totals.cache_write.to_i.positive?
+          context.cache_creation_tokens = totals.cache_write
+          context[:cache_creation_tokens] = totals.cache_write
         end
         context[:llm_usage] = {
           "requests" => billed.size,
-          "last_input_tokens" => last.input_tokens.to_i,
-          "last_output_tokens" => last.output_tokens.to_i
+          "last_input_tokens" => last_tokens.input.to_i,
+          "last_output_tokens" => last_tokens.output.to_i
         }
         calculate_costs(
-          RubyLLM::Message.new(role: :assistant, content: "", model_id: last.model_id, **totals),
+          RubyLLM::Message.new(role: :assistant, content: "", model: response_model_id(last), tokens: totals),
           context
         )
       rescue => e
@@ -1081,10 +1169,7 @@ module RubyLLM
         baseline = @usage_history_baseline
         return [] unless baseline
 
-        Array(@client&.messages).drop(baseline).select do |message|
-          message.respond_to?(:role) && message.role == :assistant &&
-            message.respond_to?(:input_tokens) && message.input_tokens
-        end
+        Array(@client&.messages).drop(baseline).select { |message| billed_response?(message) }
       end
 
       # Number of messages in the client history, or nil when it is
@@ -1104,7 +1189,7 @@ module RubyLLM
       # "anthropic/claude-4.6-sonnet-20260217") that aren't in the
       # RubyLLM::Models registry, while the agent is configured with a
       # stable alias (e.g. "anthropic/claude-sonnet-4.6") that is. When the
-      # response's model_id misses, fall back to the agent's configured
+      # response's model misses, fall back to the agent's configured
       # model so cost calculation still finds pricing.
       #
       # Text input/output are priced from the context's token counts. These
@@ -1118,7 +1203,7 @@ module RubyLLM
       # @param response [RubyLLM::Message] The response
       # @param context [Pipeline::Context] The context
       def calculate_costs(response, context)
-        model_info = find_model_info(response.model_id) || find_model_info(model)
+        model_info = find_model_info(response_model_id(response)) || find_model_info(model)
         return unless model_info
 
         input_tokens = context.input_tokens || 0
@@ -1159,7 +1244,7 @@ module RubyLLM
       # rate instead, so an unpriced model is never under-billed.
       #
       # @param cost [RubyLLM::Cost] The response's cost helper
-      # @param model_info [RubyLLM::Model::Info] Resolved pricing source
+      # @param model_info [RubyLLM::Model] Resolved pricing source
       # @param context [Pipeline::Context] The execution context
       # @return [Float, nil] Cache-read cost in USD, or nil when nothing to bill
       def cache_read_cost(cost, model_info, context)
@@ -1187,9 +1272,8 @@ module RubyLLM
       def reasoning_tokens_charged(response, context)
         breakdown = context[:cost_breakdown]
         return 0 unless breakdown.is_a?(Hash) && breakdown.key?(:thinking)
-        return 0 unless response.respond_to?(:reasoning_tokens)
 
-        response.reasoning_tokens.to_i
+        response_tokens(response)&.thinking.to_i
       end
 
       # Prices the non-text token components (cache reads/writes, reasoning)
@@ -1201,7 +1285,7 @@ module RubyLLM
       # accuracy is additive and never regresses text pricing.
       #
       # @param response [Object] The response (RubyLLM::Message in production)
-      # @param model_info [RubyLLM::Model::Info] Resolved pricing source
+      # @param model_info [RubyLLM::Model] Resolved pricing source
       # @param context [Pipeline::Context] The context
       # @return [Float] Combined cache + reasoning cost, or 0.0
       def extra_token_costs(response, model_info, context)
@@ -1235,7 +1319,7 @@ module RubyLLM
       # simple structs/mocks in tests — so callers skip the extra components.
       #
       # @param response [Object] The response (RubyLLM::Message in production)
-      # @param model_info [RubyLLM::Model::Info] Resolved pricing source
+      # @param model_info [RubyLLM::Model] Resolved pricing source
       # @return [RubyLLM::Cost, nil]
       def response_cost(response, model_info)
         return nil unless response.respond_to?(:cost)
@@ -1291,15 +1375,15 @@ module RubyLLM
       # Adds cache_control to the last tool so Anthropic caches all tool definitions
       #
       # Uses a singleton method override on the last tool instance so the
-      # cache_control is merged into the API payload by RubyLLM's
-      # Tools.function_for without mutating the tool class.
+      # cache_control is merged into the tool's payload (RubyLLM deep-merges
+      # Tool#provider_options into it) without mutating the tool class.
       #
       # @param client [RubyLLM::Chat] The chat client with tools already added
       def apply_tool_prompt_caching(client)
         last_tool = client.tools.values.last
         return unless last_tool
 
-        last_tool.define_singleton_method(:provider_params) do
+        last_tool.define_singleton_method(:provider_options) do
           super().merge(cache_control: {type: "ephemeral"})
         end
       end
@@ -1352,7 +1436,8 @@ module RubyLLM
         data = {}
         data[:thinking_text] = extract_thinking_value(thinking, :text)
         data[:thinking_signature] = extract_thinking_value(thinking, :signature)
-        data[:thinking_tokens] = extract_thinking_value(thinking, :tokens)
+        # RubyLLM 2 counts thinking tokens with the usage, not on Thinking
+        data[:thinking_tokens] = extract_thinking_value(thinking, :tokens) || response_tokens(response)&.thinking
 
         data.compact
       end
@@ -1398,11 +1483,11 @@ module RubyLLM
       # @return [RubyLLM::Chat] Client with tracking callbacks
       def setup_tool_tracking(client)
         client
-          .on_tool_call do |tool_call|
+          .before_tool_call do |tool_call|
             start_tracking_tool_call(tool_call)
             emit_stream_event(:tool_start, tool_call_start_data(tool_call))
           end
-          .on_tool_result do |result|
+          .after_tool_result do |result|
             end_data = tool_call_end_data(result)
             complete_tool_call_tracking(result)
             emit_stream_event(:tool_end, end_data)
@@ -1494,7 +1579,9 @@ module RubyLLM
         status = "success"
         error_message = nil
 
-        if result.is_a?(Exception)
+        if result.is_a?(RubyLLM::Agents::Tool::Halt)
+          content = result.content
+        elsif result.is_a?(Exception)
           content = result.message
           status = "error"
           error_message = "#{result.class}: #{result.message}"

@@ -2,29 +2,18 @@
 
 # Mock RubyLLM module for testing agents without actual API calls
 module RubyLLM
+  # Shaped like a RubyLLM 2 Message: usage in #tokens, model id in #model
   class MockResponse
-    attr_reader :content, :input_tokens, :output_tokens, :model_id
+    attr_reader :content, :tokens, :model
 
     def initialize(content, input_tokens: 10, output_tokens: 5, model_id: "gpt-4o")
       @content = content
-      @input_tokens = input_tokens
-      @output_tokens = output_tokens
-      @model_id = model_id
+      @tokens = RubyLLM::Tokens.new(input: input_tokens, output: output_tokens)
+      @model = model_id
     end
 
-    # Returns usage data in the format expected by BaseAgent
-    def usage
-      {
-        input_tokens: @input_tokens,
-        output_tokens: @output_tokens,
-        cache_creation_input_tokens: 0,
-        cache_read_input_tokens: 0
-      }
-    end
-
-    # Alias for backward compatibility with tests
-    def total_tokens
-      @input_tokens + @output_tokens
+    def role
+      :assistant
     end
 
     # Thinking support (returns nil by default)
@@ -44,9 +33,9 @@ module RubyLLM
       []
     end
 
-    # Finish reason (stop, length, tool_calls, etc.)
+    # Finish reason (:stop, :max_tokens, :tool_calls, etc.)
     def finish_reason
-      "stop"
+      :stop
     end
   end
 
@@ -87,18 +76,23 @@ module RubyLLM
       self
     end
 
+    def with_tool_options(**options)
+      @tool_options = options
+      self
+    end
+
     def with_thinking(**options)
       @thinking_options = options
       self
     end
 
-    def on_tool_call(&block)
-      @on_tool_call = block
+    def before_tool_call(&block)
+      @before_tool_call = block
       self
     end
 
-    def on_tool_result(&block)
-      @on_tool_result = block
+    def after_tool_result(&block)
+      @after_tool_result = block
       self
     end
 
@@ -111,19 +105,23 @@ module RubyLLM
       MockResponse.new("Mock response")
     end
 
+    def generate
+      MockResponse.new("Mock response")
+    end
+
     def complete
       MockResponse.new("Mock response")
     end
   end
 
-  # Mock embedding response
+  # Mock embedding response, shaped like RubyLLM 2's Embedding
   class MockEmbeddingResponse
-    attr_reader :vectors, :model_id, :input_tokens
+    attr_reader :vectors, :model, :tokens
 
     def initialize(vectors: nil, model_id: "text-embedding-3-small", input_tokens: 10, dimensions: 1536)
       @vectors = vectors || [Array.new(dimensions) { rand(-1.0..1.0) }]
-      @model_id = model_id
-      @input_tokens = input_tokens
+      @model = model_id
+      @tokens = RubyLLM::Tokens.new(input: input_tokens)
     end
 
     def embedding
@@ -132,14 +130,6 @@ module RubyLLM
 
     def embeddings
       @vectors
-    end
-
-    def usage
-      {input_tokens: @input_tokens}
-    end
-
-    def cost
-      0.0001
     end
   end
 

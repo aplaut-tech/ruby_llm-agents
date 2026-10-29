@@ -43,8 +43,8 @@ RSpec.describe "prompt cache accounting" do
     execution = run_with(RubyLLM::Message.new(
       role: :assistant, content: "ok",
       input_tokens: 1096, output_tokens: 50,
-      cached_tokens: 6016, cache_creation_tokens: 0,
-      model_id: "claude-sonnet-4-5-20250929"
+      cache_read_tokens: 6016, cache_write_tokens: 0,
+      model: "claude-sonnet-4-5-20250929"
     ))
 
     expect(execution.cached_tokens).to eq(6016)
@@ -54,8 +54,8 @@ RSpec.describe "prompt cache accounting" do
     execution = run_with(RubyLLM::Message.new(
       role: :assistant, content: "ok",
       input_tokens: 1096, output_tokens: 50,
-      cached_tokens: 0, cache_creation_tokens: 2048,
-      model_id: "claude-sonnet-4-5-20250929"
+      cache_read_tokens: 0, cache_write_tokens: 2048,
+      model: "claude-sonnet-4-5-20250929"
     ))
 
     expect(execution.detail.cache_creation_tokens).to eq(2048)
@@ -65,7 +65,7 @@ RSpec.describe "prompt cache accounting" do
     execution = run_with(RubyLLM::Message.new(
       role: :assistant, content: "ok",
       input_tokens: 1096, output_tokens: 50,
-      model_id: "claude-sonnet-4-5-20250929"
+      model: "claude-sonnet-4-5-20250929"
     ))
 
     expect(execution.cached_tokens).to eq(0)

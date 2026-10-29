@@ -51,11 +51,11 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "uncovered branches", type: :model do
     it "sets @force_streaming on the instance and calls it" do
       captured = nil
       # Stub the LLM boundary: a client whose ask streams one chunk.
-      chunk = RubyLLM::Message.new(role: :assistant, content: "hi", model_id: "gpt-4o")
+      chunk = RubyLLM::Message.new(role: :assistant, content: "hi", model: "gpt-4o")
       client = build_mock_chat_client
       allow(client).to receive(:ask) do |_prompt, **_opts, &blk|
         blk&.call(chunk)
-        RubyLLM::Message.new(role: :assistant, content: "hi", model_id: "gpt-4o",
+        RubyLLM::Message.new(role: :assistant, content: "hi", model: "gpt-4o",
           input_tokens: 5, output_tokens: 2)
       end
       stub_ruby_llm_chat(client)
@@ -184,14 +184,14 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "uncovered branches", type: :model do
     end
 
     it "wraps UnauthorizedError with a setup hint" do
-      err = RubyLLM::UnauthorizedError.new(nil, "bad key")
+      err = RubyLLM::UnauthorizedError.new("bad key")
       expect { run_execute_with_client(error: err) }.to raise_error(
         RubyLLM::Agents::ConfigurationError, /API key for OpenAI is missing or invalid/
       )
     end
 
     it "wraps ForbiddenError with a setup hint" do
-      err = RubyLLM::ForbiddenError.new(nil, "forbidden")
+      err = RubyLLM::ForbiddenError.new("forbidden")
       expect { run_execute_with_client(error: err) }.to raise_error(
         RubyLLM::Agents::ConfigurationError, /rails ruby_llm_agents:doctor/
       )
@@ -226,14 +226,14 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "uncovered branches", type: :model do
 
     it "streams chunks, records time_to_first_token, and returns the final message" do
       chunks = [
-        RubyLLM::Message.new(role: :assistant, content: "Hello ", model_id: "gpt-4o"),
-        RubyLLM::Message.new(role: :assistant, content: "world", model_id: "gpt-4o")
+        RubyLLM::Message.new(role: :assistant, content: "Hello ", model: "gpt-4o"),
+        RubyLLM::Message.new(role: :assistant, content: "world", model: "gpt-4o")
       ]
       final = RubyLLM::Message.new(role: :assistant, content: "Hello world",
-        model_id: "gpt-4o", input_tokens: 10, output_tokens: 4)
+        model: "gpt-4o", input_tokens: 10, output_tokens: 4)
 
       client = build_mock_chat_client
-      allow(client).to receive(:complete) do |&blk|
+      allow(client).to receive(:generate) do |&blk|
         chunks.each { |c| blk&.call(c) }
         final
       end
@@ -252,10 +252,10 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "uncovered branches", type: :model do
     end
 
     it "emits StreamEvents when stream_events is enabled" do
-      final = RubyLLM::Message.new(role: :assistant, content: "done", model_id: "gpt-4o")
+      final = RubyLLM::Message.new(role: :assistant, content: "done", model: "gpt-4o")
       client = build_mock_chat_client
-      allow(client).to receive(:complete) do |&blk|
-        blk&.call(RubyLLM::Message.new(role: :assistant, content: "x", model_id: "gpt-4o"))
+      allow(client).to receive(:generate) do |&blk|
+        blk&.call(RubyLLM::Message.new(role: :assistant, content: "x", model: "gpt-4o"))
         final
       end
 
@@ -272,22 +272,86 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "uncovered branches", type: :model do
     end
   end
 
+  # RubyLLM 2's Chat#complete returns a trailing assistant message as the
+  # answer without a request, so the prefill must be continued with #generate.
+  describe "#execute_with_prefill requests" do
+    let(:prefill_agent_class) do
+      Class.new(described_class) do
+        def self.name = "PrefillRequestAgent"
+        model "gpt-4o"
+        user "Continue this"
+        assistant "Sure, here goes:"
+      end
+    end
+
+    let(:prefill_agent) do
+      prefill_agent_class.allocate.tap { |a| a.instance_variable_set(:@options, {}) }
+    end
+
+    it "adds the user turn and the prefill, then generates the continuation" do
+      continuation = build_real_response(content: " the answer")
+      client = build_mock_chat_client
+      expect(client).to receive(:add_message).with(role: :user, content: "Continue this").ordered
+      expect(client).to receive(:add_message).with(role: :assistant, content: "Sure, here goes:").ordered
+      expect(client).to receive(:generate).ordered.and_return(continuation)
+      expect(client).not_to receive(:complete)
+
+      response = prefill_agent.send(
+        :execute_with_prefill, client, new_context(klass: prefill_agent_class, instance: prefill_agent),
+        {role: :assistant, content: "Sure, here goes:"}
+      )
+
+      expect(response).to eq(continuation)
+    end
+
+    it "runs the tool loop when the continuation calls tools" do
+      tool_call = RubyLLM::ToolCall.new(id: "call_1", name: "lookup", arguments: {})
+      calling = build_real_response(content: "", tool_calls: {"call_1" => tool_call})
+      final = build_real_response(content: "done")
+      client = build_mock_chat_client
+      allow(client).to receive(:generate).and_return(calling)
+      expect(client).to receive(:complete).and_return(final)
+
+      response = prefill_agent.send(
+        :execute_with_prefill, client, new_context(klass: prefill_agent_class, instance: prefill_agent),
+        {role: :assistant, content: "Sure, here goes:"}
+      )
+
+      expect(response).to eq(final)
+    end
+
+    it "makes a request on a real RubyLLM::Chat instead of returning the prefill" do
+      llm = RubyLLM.context { |config| config.openai_api_key = "test-key" }
+      chat = llm.chat(model: "gpt-4o", provider: :openai, assume_model_exists: true)
+      continuation = build_real_response(content: " the answer", model_id: "gpt-4o")
+      expect_any_instance_of(RubyLLM::Providers::OpenAI).to receive(:complete).once.and_return(continuation)
+
+      response = prefill_agent.send(
+        :execute_with_prefill, chat, new_context(klass: prefill_agent_class, instance: prefill_agent),
+        {role: :assistant, content: "Sure, here goes:"}
+      )
+
+      expect(response.content).to eq(" the answer")
+      expect(chat.messages.map(&:role)).to eq(%i[user assistant assistant])
+    end
+  end
+
   # --- capture_response halt path (lines 928-958) -----------------------------
 
   describe "#capture_response with Tool::Halt" do
     it "recovers token/model metadata from the last assistant message in the client history" do
       assistant_msg = RubyLLM::Message.new(
-        role: :assistant, content: "partial", model_id: "gpt-4o",
-        input_tokens: 1000, output_tokens: 500, cached_tokens: 200, cache_creation_tokens: 30
+        role: :assistant, content: "partial", model: "gpt-4o",
+        input_tokens: 1000, output_tokens: 500, cache_read_tokens: 200, cache_write_tokens: 30
       )
       client = build_mock_chat_client
       allow(client).to receive(:messages).and_return([
-        RubyLLM::Message.new(role: :user, content: "q", model_id: "gpt-4o"),
+        RubyLLM::Message.new(role: :user, content: "q", model: "gpt-4o"),
         assistant_msg
       ])
       agent.instance_variable_set(:@client, client)
 
-      halt = RubyLLM::Tool::Halt.new("stopped")
+      halt = RubyLLM::Agents::Tool::Halt.new("stopped")
       ctx = new_context
 
       agent.send(:capture_response, halt, ctx)
@@ -305,12 +369,12 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "uncovered branches", type: :model do
     it "falls back to the agent model when no usage-bearing message exists" do
       client = build_mock_chat_client
       allow(client).to receive(:messages).and_return([
-        RubyLLM::Message.new(role: :user, content: "q", model_id: "gpt-4o")
+        RubyLLM::Message.new(role: :user, content: "q", model: "gpt-4o")
       ])
       agent.instance_variable_set(:@client, client)
 
       ctx = new_context
-      agent.send(:capture_response, RubyLLM::Tool::Halt.new("stopped"), ctx)
+      agent.send(:capture_response, RubyLLM::Agents::Tool::Halt.new("stopped"), ctx)
 
       expect(ctx.model_used).to eq("gpt-4o")
       expect(ctx.finish_reason).to eq("halt")
@@ -325,8 +389,8 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "uncovered branches", type: :model do
     end
 
     it "finds the most recent assistant message carrying input_tokens" do
-      older = RubyLLM::Message.new(role: :assistant, content: "old", model_id: "gpt-4o", input_tokens: 1)
-      newer = RubyLLM::Message.new(role: :assistant, content: "new", model_id: "gpt-4o", input_tokens: 2)
+      older = RubyLLM::Message.new(role: :assistant, content: "old", model: "gpt-4o", input_tokens: 1)
+      newer = RubyLLM::Message.new(role: :assistant, content: "new", model: "gpt-4o", input_tokens: 2)
       client = build_mock_chat_client
       allow(client).to receive(:messages).and_return([older, newer])
       agent.instance_variable_set(:@client, client)
@@ -344,19 +408,18 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "uncovered branches", type: :model do
     # internal methods are stubbed.
     def build_cost(prices:, thinking: nil)
       tokens = RubyLLM::Tokens.new(input: 1, output: 1, thinking: thinking)
-      text = Struct.new(
-        :input, :output, :cache_read_input, :cache_write_input, :reasoning_output,
-        keyword_init: true
-      ).new(**prices)
-      pricing = Struct.new(:text_tokens).new(text)
-      model = Struct.new(:pricing).new(pricing)
+      model = RubyLLM::Model.new(
+        id: "pricing-fixture",
+        provider: "perplexity",
+        pricing: {text_tokens: {standard: prices.compact.transform_keys { |kind| :"#{kind}_per_million" }}}
+      )
 
       RubyLLM::Cost.new(tokens: tokens, model: model)
     end
 
-    # A response carrying reasoning_tokens (the production RubyLLM::Message shape).
+    # A response whose usage reports reasoning tokens (RubyLLM::Message#tokens).
     def message_with_reasoning(reasoning_tokens:)
-      Struct.new(:reasoning_tokens).new(reasoning_tokens)
+      Struct.new(:tokens).new(RubyLLM::Tokens.new(thinking: reasoning_tokens))
     end
 
     describe "#reasoning_tokens_charged" do
@@ -374,11 +437,11 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "uncovered branches", type: :model do
         expect(agent.send(:reasoning_tokens_charged, response, ctx)).to eq(0)
       end
 
-      it "returns 0 when the response does not respond to reasoning_tokens" do
+      it "returns 0 when the response reports no usage" do
         ctx = new_context
         ctx[:cost_breakdown] = {thinking: 0.0009}
         plain = Struct.new(:content).new("x")
-        expect(plain.respond_to?(:reasoning_tokens)).to be(false)
+        expect(plain.respond_to?(:tokens)).to be(false)
         expect(agent.send(:reasoning_tokens_charged, plain, ctx)).to eq(0)
       end
 
@@ -437,14 +500,14 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "uncovered branches", type: :model do
           reasoning_output: pricing.reasoning_output
         }
       )
-      response = Struct.new(:model_id, :reasoning_tokens, keyword_init: true) do
+      response = Struct.new(:model, :tokens, keyword_init: true) do
         def cost(*) = @cost
 
         def with_cost(c)
           @cost = c
           self
         end
-      end.new(model_id: model_id, reasoning_tokens: 300).with_cost(extra)
+      end.new(model: model_id, tokens: RubyLLM::Tokens.new(thinking: 300)).with_cost(extra)
 
       reasoning_agent.send(:calculate_costs, response, reasoning_context)
 
@@ -464,9 +527,9 @@ RSpec.describe RubyLLM::Agents::BaseAgent, "uncovered branches", type: :model do
       # The response exposes reasoning_tokens but its #cost raises, so
       # extra_token_costs degrades and records no breakdown. Reasoning must NOT
       # be removed from the output charge, otherwise it would vanish entirely.
-      response = Struct.new(:model_id, :reasoning_tokens, keyword_init: true) do
+      response = Struct.new(:model, :tokens, keyword_init: true) do
         def cost(*) = raise("pricing blew up")
-      end.new(model_id: model_id, reasoning_tokens: 300)
+      end.new(model: model_id, tokens: RubyLLM::Tokens.new(thinking: 300))
 
       with_captured_rails_logger([]) do
         reasoning_agent.send(:calculate_costs, response, reasoning_context)

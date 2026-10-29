@@ -21,7 +21,7 @@ RSpec.describe RubyLLM::Agents::Embedder do
     double(
       "EmbeddingResponse",
       vectors: [[0.1, 0.2, 0.3]],
-      input_tokens: 5,
+      tokens: RubyLLM::Tokens.new(input: 5),
       model: "text-embedding-3-small"
     )
   end
@@ -30,7 +30,7 @@ RSpec.describe RubyLLM::Agents::Embedder do
     double(
       "EmbeddingResponse",
       vectors: [[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]],
-      input_tokens: 15,
+      tokens: RubyLLM::Tokens.new(input: 15),
       model: "text-embedding-3-small"
     )
   end
@@ -259,8 +259,8 @@ RSpec.describe RubyLLM::Agents::Embedder do
       end
 
       it "splits into batches based on batch_size" do
-        batch1_response = double(vectors: [[0.1], [0.2]], input_tokens: 4, model: "test")
-        batch2_response = double(vectors: [[0.3]], input_tokens: 2, model: "test")
+        batch1_response = double(vectors: [[0.1], [0.2]], tokens: RubyLLM::Tokens.new(input: 4), model: "test")
+        batch2_response = double(vectors: [[0.3]], tokens: RubyLLM::Tokens.new(input: 2), model: "test")
         allow(batch1_response).to receive(:respond_to?).with(:input_cost).and_return(false)
         allow(batch2_response).to receive(:respond_to?).with(:input_cost).and_return(false)
 
@@ -273,8 +273,8 @@ RSpec.describe RubyLLM::Agents::Embedder do
       end
 
       it "calls progress block for each batch" do
-        batch1_response = double(vectors: [[0.1], [0.2]], input_tokens: 4, model: "test")
-        batch2_response = double(vectors: [[0.3]], input_tokens: 2, model: "test")
+        batch1_response = double(vectors: [[0.1], [0.2]], tokens: RubyLLM::Tokens.new(input: 4), model: "test")
+        batch2_response = double(vectors: [[0.3]], tokens: RubyLLM::Tokens.new(input: 2), model: "test")
         allow(batch1_response).to receive(:respond_to?).with(:input_cost).and_return(false)
         allow(batch2_response).to receive(:respond_to?).with(:input_cost).and_return(false)
 
@@ -415,7 +415,7 @@ RSpec.describe RubyLLM::Agents::Embedder do
     it "uses response cost if available" do
       response_with_cost = double(
         vectors: [[0.1]],
-        input_tokens: 100,
+        tokens: RubyLLM::Tokens.new(input: 100),
         model: "text-embedding-3-small",
         input_cost: 0.05
       )
@@ -430,7 +430,7 @@ RSpec.describe RubyLLM::Agents::Embedder do
     it "looks up cost from model registry when response has no cost" do
       mock_response = double(
         vectors: [[0.1]],
-        input_tokens: 1_000_000,
+        tokens: RubyLLM::Tokens.new(input: 1_000_000),
         model: "text-embedding-3-small"
       )
       allow(mock_response).to receive(:respond_to?).with(:input_cost).and_return(false)
@@ -450,7 +450,7 @@ RSpec.describe RubyLLM::Agents::Embedder do
     it "returns zero cost when model registry has no pricing" do
       mock_response = double(
         vectors: [[0.1]],
-        input_tokens: 1_000_000,
+        tokens: RubyLLM::Tokens.new(input: 1_000_000),
         model: "unknown-embedding-model"
       )
       allow(mock_response).to receive(:respond_to?).with(:input_cost).and_return(false)

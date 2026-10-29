@@ -8,7 +8,7 @@ require "rails_helper"
 # The subtlety is WHERE they live. Every RubyLLM provider reports input_tokens
 # already NET of the cache reads — Anthropic natively, and OpenAI, Gemini,
 # Bedrock and OpenRouter by subtracting the cache counters while parsing usage
-# (see e.g. Providers::OpenAI::Chat#input_tokens). So the cache read is always
+# (see e.g. Protocols::Responses::Chat#parse_usage). So the cache read is always
 # additive, and the cost is input_tokens @ full rate + cached_tokens @ cache
 # rate. Treating any provider as "cached tokens are already inside input_tokens"
 # subtracts them a second time, clamps the remainder to zero, and bills the real
@@ -18,21 +18,19 @@ RSpec.describe "Cached token pricing" do
 
   # Builds a message exactly the way the provider's own parser would, so the
   # input_tokens/cached_tokens pairing under test is one RubyLLM really emits.
+  # OpenAI chats default to the Responses API in RubyLLM 2.
   def openai_message(model_id, prompt_tokens:, cached:, completion_tokens: 0)
     usage = {
-      "prompt_tokens" => prompt_tokens,
-      "completion_tokens" => completion_tokens,
+      "input_tokens" => prompt_tokens,
+      "output_tokens" => completion_tokens,
       "total_tokens" => prompt_tokens + completion_tokens,
-      "prompt_tokens_details" => {"cached_tokens" => cached}
+      "input_tokens_details" => {"cached_tokens" => cached}
     }
     RubyLLM::Message.new(
       role: :assistant,
       content: "ok",
-      input_tokens: RubyLLM::Providers::OpenAI::Chat.input_tokens(usage),
-      output_tokens: RubyLLM::Providers::OpenAI::Chat.output_tokens(usage),
-      cached_tokens: RubyLLM::Providers::OpenAI::Chat.cache_read_tokens(usage),
-      cache_creation_tokens: RubyLLM::Providers::OpenAI::Chat.cache_write_tokens(usage),
-      model_id: model_id
+      model: model_id,
+      **RubyLLM::Protocols::Responses::Chat.parse_usage(usage)
     )
   end
 
@@ -40,8 +38,8 @@ RSpec.describe "Cached token pricing" do
     RubyLLM::Message.new(
       role: :assistant, content: "ok",
       input_tokens: input, output_tokens: output,
-      cached_tokens: cached, cache_creation_tokens: cache_creation,
-      model_id: model_id
+      cache_read_tokens: cached, cache_write_tokens: cache_creation,
+      model: model_id
     )
   end
 
@@ -110,7 +108,7 @@ RSpec.describe "Cached token pricing" do
 
       ctx = cost_for(message, "gpt-4.1")
 
-      expect(message.input_tokens).to eq(1096)
+      expect(message.tokens.input).to eq(1096)
       expect(ctx.input_cost).to be_within(1e-9).of(1096 / 1e6 * input_price)
     end
 

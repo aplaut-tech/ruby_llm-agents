@@ -55,7 +55,7 @@ RSpec.describe "Tool cancellation", type: :model do
         end
 
         description "A cancellable tool"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           "should not reach here"
@@ -63,7 +63,7 @@ RSpec.describe "Tool cancellation", type: :model do
       end
 
       tool = tool_class.new
-      expect { tool.call({input: "test"}) }.to raise_error(RubyLLM::Agents::CancelledError)
+      expect { tool.call(input: "test") }.to raise_error(RubyLLM::Agents::CancelledError)
     end
 
     it "does not cancel when on_cancelled returns false" do
@@ -76,7 +76,7 @@ RSpec.describe "Tool cancellation", type: :model do
         end
 
         description "A tool that should not cancel"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           "completed"
@@ -84,7 +84,7 @@ RSpec.describe "Tool cancellation", type: :model do
       end
 
       tool = tool_class.new
-      result = tool.call({input: "test"})
+      result = tool.call(input: "test")
       expect(result).to eq("completed")
     end
 
@@ -97,7 +97,7 @@ RSpec.describe "Tool cancellation", type: :model do
         end
 
         description "A tool with no cancel proc"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           "completed"
@@ -105,7 +105,7 @@ RSpec.describe "Tool cancellation", type: :model do
       end
 
       tool = tool_class.new
-      result = tool.call({input: "test"})
+      result = tool.call(input: "test")
       expect(result).to eq("completed")
     end
 
@@ -119,7 +119,7 @@ RSpec.describe "Tool cancellation", type: :model do
         end
 
         description "Tracked and cancelled"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           "nope"
@@ -127,7 +127,7 @@ RSpec.describe "Tool cancellation", type: :model do
       end
 
       tool = tool_class.new
-      expect { tool.call({input: "test"}) }.to raise_error(RubyLLM::Agents::CancelledError)
+      expect { tool.call(input: "test") }.to raise_error(RubyLLM::Agents::CancelledError)
 
       record = RubyLLM::Agents::ToolExecution.last
       expect(record.status).to eq("cancelled")
@@ -144,7 +144,7 @@ RSpec.describe "Tool cancellation", type: :model do
         end
 
         description "Counts calls"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           "call done"
@@ -154,12 +154,12 @@ RSpec.describe "Tool cancellation", type: :model do
       tool = tool_class.new
 
       # First call succeeds
-      result = tool.call({input: "first"})
+      result = tool.call(input: "first")
       call_count = 1
       expect(result).to eq("call done")
 
       # Second call is cancelled before execution
-      expect { tool.call({input: "second"}) }.to raise_error(RubyLLM::Agents::CancelledError)
+      expect { tool.call(input: "second") }.to raise_error(RubyLLM::Agents::CancelledError)
     end
   end
 

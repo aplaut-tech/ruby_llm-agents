@@ -262,12 +262,12 @@ module RubyLLM
 
         # Sets or returns the response schema for structured output
         #
-        # Accepts a hash (JSON Schema), a block (passed to RubyLLM::Schema.create),
+        # Accepts a hash (JSON Schema), a block (passed to Schematist::Schema.create),
         # or any object that responds to `to_json_schema`.
         #
         # @param value [Hash, Object, nil] The schema to set
-        # @param block [Proc, nil] Block passed to RubyLLM::Schema.create
-        # @return [Hash, RubyLLM::Schema, nil] The current schema setting
+        # @param block [Proc, nil] Block passed to Schematist::Schema.create
+        # @return [Hash, Class, nil] The current schema setting
         # @example With a block (recommended)
         #   schema do
         #     string :name, description: "The user's name"
@@ -279,7 +279,7 @@ module RubyLLM
           if value
             @schema = value
           elsif block
-            @schema = RubyLLM::Schema.create(&block)
+            @schema = Schematist::Schema.create(&block)
           end
           @schema || inherited_or_default(:schema, nil)
         end
@@ -289,8 +289,8 @@ module RubyLLM
         # Defines the structured output schema for this agent.
         # This is the preferred method for defining schemas in the simplified DSL.
         #
-        # @param block [Proc] Block passed to RubyLLM::Schema.create
-        # @return [RubyLLM::Schema, nil] The current schema setting
+        # @param block [Proc] Block passed to Schematist::Schema.create
+        # @return [Class, Hash, nil] The current schema setting (a Schematist::Schema subclass for blocks)
         #
         # @example
         #   returns do

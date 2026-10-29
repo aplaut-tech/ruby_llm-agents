@@ -58,8 +58,9 @@ module RubyLLM
       # - timeout: completed due to timeout
       enum :status, %w[running success error timeout].index_by(&:itself), prefix: true
 
-      # Allowed finish reasons from LLM providers
-      FINISH_REASONS = %w[stop length content_filter tool_calls other].freeze
+      # Allowed finish reasons. Provider reasons are normalized onto these;
+      # "halt" marks a tool loop a tool ended with Tool#halt.
+      FINISH_REASONS = %w[stop length content_filter tool_calls halt other].freeze
 
       # Allowed fallback reasons for model switching
       FALLBACK_REASONS = %w[price_limit quality_fail rate_limit timeout safety error other].freeze

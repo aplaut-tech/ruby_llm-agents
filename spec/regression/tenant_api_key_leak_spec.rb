@@ -49,7 +49,7 @@ RSpec.describe "tenant API key leak" do
     allow(client).to receive(:messages).and_return([])
     allow(client).to receive(:ask).and_return(
       RubyLLM::Message.new(role: :assistant, content: "hi",
-        input_tokens: 10, output_tokens: 5, model_id: "gpt-4.1")
+        input_tokens: 10, output_tokens: 5, model: "gpt-4.1")
     )
     allow(RubyLLM).to receive(:chat).and_return(client)
     allow_any_instance_of(RubyLLM::Context).to receive(:chat).and_return(client)

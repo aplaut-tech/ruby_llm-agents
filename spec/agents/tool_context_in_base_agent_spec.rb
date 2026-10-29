@@ -23,7 +23,7 @@ RSpec.describe "Tool context availability in Core::Base agents (Issue #22)" do
       end
 
       description "Captures execution context for testing"
-      param :path, desc: "A file path", required: true
+      parameter :path, description: "A file path", required: true
 
       def execute(path:)
         # Store what we observed for the test to inspect
@@ -122,16 +122,16 @@ RSpec.describe "Tool context availability in Core::Base agents (Issue #22)" do
     allow(mock_client).to receive(:add_message).and_return(mock_client)
     allow(mock_client).to receive(:messages).and_return([])
 
-    # Capture the on_tool_call and on_tool_result callbacks
+    # Capture the before_tool_call and after_tool_result callbacks
     tool_call_block = nil
     tool_result_block = nil
 
-    allow(mock_client).to receive(:on_tool_call) do |&blk|
+    allow(mock_client).to receive(:before_tool_call) do |&blk|
       tool_call_block = blk
       mock_client
     end
 
-    allow(mock_client).to receive(:on_tool_result) do |&blk|
+    allow(mock_client).to receive(:after_tool_result) do |&blk|
       tool_result_block = blk
       mock_client
     end
@@ -148,13 +148,13 @@ RSpec.describe "Tool context availability in Core::Base agents (Issue #22)" do
         arguments: {path: "/app/Gemfile"}
       )
 
-      # Notify on_tool_call callback (if set)
+      # Notify before_tool_call callback (if set)
       tool_call_block&.call(tool_call_data)
 
       # Actually call the tool (this is what RubyLLM::Chat does internally)
-      result = tool_instance.call({path: "/app/Gemfile"})
+      result = tool_instance.call(path: "/app/Gemfile")
 
-      # Notify on_tool_result callback (if set)
+      # Notify after_tool_result callback (if set)
       tool_result_block&.call(OpenStruct.new(
         tool_call_id: "call_123",
         content: result.to_s

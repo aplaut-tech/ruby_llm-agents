@@ -799,7 +799,7 @@ RSpec.describe RubyLLM::Agents::Base do
     let(:regular_tool) do
       Class.new(RubyLLM::Tool) do
         description "A regular tool"
-        param :input, desc: "Input text"
+        parameter :input, description: "Input text"
 
         def execute(input:)
           "result: #{input}"
@@ -826,7 +826,7 @@ RSpec.describe RubyLLM::Agents::Base do
     it "raises on duplicate tool names" do
       tool1 = Class.new(RubyLLM::Tool) do
         description "First search"
-        param :query, desc: "Query"
+        parameter :query, description: "Query"
 
         def self.name
           "SearchTool"
@@ -839,7 +839,7 @@ RSpec.describe RubyLLM::Agents::Base do
 
       tool2 = Class.new(RubyLLM::Tool) do
         description "Second search"
-        param :query, desc: "Query"
+        parameter :query, description: "Query"
 
         def self.name
           "SearchTool"

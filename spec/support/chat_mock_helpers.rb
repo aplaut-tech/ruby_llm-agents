@@ -17,10 +17,11 @@ module ChatMockHelpers
     allow(mock_client).to receive(:with_instructions).and_return(mock_client)
     allow(mock_client).to receive(:with_schema).and_return(mock_client)
     allow(mock_client).to receive(:with_tools).and_return(mock_client)
+    allow(mock_client).to receive(:with_tool_options).and_return(mock_client)
     allow(mock_client).to receive(:with_thinking).and_return(mock_client)
     allow(mock_client).to receive(:add_message).and_return(mock_client)
-    allow(mock_client).to receive(:on_tool_call).and_return(mock_client)
-    allow(mock_client).to receive(:on_tool_result).and_return(mock_client)
+    allow(mock_client).to receive(:before_tool_call).and_return(mock_client)
+    allow(mock_client).to receive(:after_tool_result).and_return(mock_client)
     allow(mock_client).to receive(:messages).and_return([])
 
     # Configure response behavior
@@ -33,17 +34,20 @@ module ChatMockHelpers
     mock_client
   end
 
-  # Build a mock RubyLLM::Message response
-  # Uses a regular double rather than instance_double because RubyLLM::Message
-  # may have different method signatures depending on version
+  # Build a mock RubyLLM::Message response shaped like RubyLLM 2: usage
+  # lives in a real RubyLLM::Tokens under #tokens, the answering model in
+  # #model, and the finish reason is a Symbol.
   #
   # @param content [String] The response content
   # @param input_tokens [Integer] Number of input tokens
   # @param output_tokens [Integer] Number of output tokens
   # @param model_id [String] The model that generated the response
   # @param tool_calls [Array, nil] Tool calls in the response
-  # @param finish_reason [String, nil] The finish reason (stop, tool_calls, length, etc.)
+  # @param finish_reason [Symbol, String, nil] The finish reason (:stop, :tool_calls, :max_tokens, etc.)
   # @param thinking [String, nil] Thinking content for extended thinking models
+  # @param cached_tokens [Integer, nil] Cache-read input tokens
+  # @param cache_creation_tokens [Integer, nil] Cache-write input tokens
+  # @param thinking_tokens [Integer, nil] Reasoning tokens
   # @return [RSpec::Mocks::Double] A mock response
   def build_mock_response(
     content: "Test response",
@@ -51,26 +55,38 @@ module ChatMockHelpers
     output_tokens: 50,
     model_id: "gpt-4",
     tool_calls: nil,
-    finish_reason: "stop",
+    finish_reason: :stop,
     thinking: nil,
     cached_tokens: nil,
-    cache_creation_tokens: nil
+    cache_creation_tokens: nil,
+    thinking_tokens: nil
   )
     mock = double("RubyLLM::Message")
 
+    allow(mock).to receive(:role).and_return(:assistant)
     allow(mock).to receive(:content).and_return(content)
-    allow(mock).to receive(:input_tokens).and_return(input_tokens)
-    allow(mock).to receive(:output_tokens).and_return(output_tokens)
-    allow(mock).to receive(:model_id).and_return(model_id)
+    allow(mock).to receive(:tokens).and_return(
+      build_tokens(
+        input: input_tokens, output: output_tokens, cache_read: cached_tokens,
+        cache_write: cache_creation_tokens, thinking: thinking_tokens
+      )
+    )
+    allow(mock).to receive(:model).and_return(model_id)
     allow(mock).to receive(:tool_calls).and_return(tool_calls)
     allow(mock).to receive(:tool_call?).and_return(tool_calls.present?)
     allow(mock).to receive(:finish_reason).and_return(finish_reason)
     allow(mock).to receive(:thinking).and_return(thinking)
-    allow(mock).to receive(:thinking_content).and_return(thinking)
-    allow(mock).to receive(:cached_tokens).and_return(cached_tokens)
-    allow(mock).to receive(:cache_creation_tokens).and_return(cache_creation_tokens)
 
     mock
+  end
+
+  # Build a real RubyLLM::Tokens usage record
+  #
+  # @return [RubyLLM::Tokens]
+  def build_tokens(input: nil, output: nil, cache_read: nil, cache_write: nil, thinking: nil)
+    RubyLLM::Tokens.new(
+      input: input, output: output, cache_read: cache_read, cache_write: cache_write, thinking: thinking
+    )
   end
 
   # Build a real RubyLLM::Message response (no mocking)
@@ -82,6 +98,7 @@ module ChatMockHelpers
   # @param model_id [String] The model that generated the response
   # @param tool_calls [Array, nil] Tool calls in the response
   # @param thinking [RubyLLM::Thinking, Hash, nil] Thinking content
+  # @param finish_reason [Symbol, nil] The finish reason
   # @return [RubyLLM::Message] A real message object
   def build_real_response(
     content: "Test response",
@@ -89,16 +106,24 @@ module ChatMockHelpers
     output_tokens: 50,
     model_id: "gpt-4o",
     tool_calls: nil,
-    thinking: nil
+    thinking: nil,
+    finish_reason: :stop,
+    cached_tokens: nil,
+    cache_creation_tokens: nil,
+    thinking_tokens: nil
   )
     RubyLLM::Message.new(
       role: :assistant,
       content: content,
-      model_id: model_id,
+      model: model_id,
       input_tokens: input_tokens,
       output_tokens: output_tokens,
+      cache_read_tokens: cached_tokens,
+      cache_write_tokens: cache_creation_tokens,
+      thinking_tokens: thinking_tokens,
       tool_calls: tool_calls,
-      thinking: thinking
+      thinking: thinking,
+      finish_reason: finish_reason
     )
   end
 

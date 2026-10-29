@@ -38,7 +38,7 @@ RSpec.describe "recovered retry" do
 
   let(:response) do
     RubyLLM::Message.new(role: :assistant, content: "hello",
-      input_tokens: 100, output_tokens: 50, model_id: "gpt-4.1")
+      input_tokens: 100, output_tokens: 50, model: "gpt-4.1")
   end
 
   # Fails the first LLM call, succeeds on the retry.

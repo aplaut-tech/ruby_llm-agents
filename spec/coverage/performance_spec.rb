@@ -163,7 +163,7 @@ RSpec.describe "hot path performance guards", type: :model do
       RubyLLM::Message.new(
         role: :assistant,
         content: "ok",
-        model_id: "gpt-4o",
+        model: "gpt-4o",
         input_tokens: 1000,
         output_tokens: 500
       )

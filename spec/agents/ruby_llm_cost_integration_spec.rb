@@ -3,19 +3,19 @@
 require "rails_helper"
 
 # End-to-end verification that a real agent run through the full pipeline
-# persists a cache-aware total cost (the RubyLLM 1.16 cost adoption), tying
+# persists a cache-aware total cost priced with RubyLLM::Cost, tying
 # together capture_response -> calculate_costs -> instrumentation persistence.
-RSpec.describe "RubyLLM 1.16 cost integration", type: :model do
-  let(:model_id) { "claude-3-5-haiku-20241022" } # has cache_read/cache_write pricing
+RSpec.describe "RubyLLM cost integration", type: :model do
+  let(:model_id) { "claude-haiku-4-5" } # has cache_read/cache_write pricing
   let(:pricing) { RubyLLM::Models.find(model_id).pricing.text_tokens }
 
   let(:agent_class) do
     Class.new(RubyLLM::Agents::Base) do
       def self.name
-        "Cache116Agent"
+        "CacheCostAgent"
       end
 
-      model "claude-3-5-haiku-20241022"
+      model "claude-haiku-4-5"
       param :query, required: true
 
       def user_prompt
@@ -28,11 +28,11 @@ RSpec.describe "RubyLLM 1.16 cost integration", type: :model do
     RubyLLM::Message.new(
       role: :assistant,
       content: "answer",
-      model_id: model_id,
+      model: model_id,
       input_tokens: 1000,
       output_tokens: 500,
-      cached_tokens: 2000,
-      cache_creation_tokens: 100
+      cache_read_tokens: 2000,
+      cache_write_tokens: 100
     )
   end
 
@@ -45,7 +45,7 @@ RSpec.describe "RubyLLM 1.16 cost integration", type: :model do
     result = agent_class.call(query: "hi")
     expect(result.content).to eq("answer")
 
-    execution = RubyLLM::Agents::Execution.where(agent_type: "Cache116Agent").last
+    execution = RubyLLM::Agents::Execution.where(agent_type: "CacheCostAgent").last
     expect(execution).to be_present
 
     text_only = ((1000 / 1_000_000.0) * pricing.input) + ((500 / 1_000_000.0) * pricing.output)
@@ -59,7 +59,7 @@ RSpec.describe "RubyLLM 1.16 cost integration", type: :model do
   it "records the cache cost breakdown in execution metadata" do
     agent_class.call(query: "hi")
 
-    execution = RubyLLM::Agents::Execution.where(agent_type: "Cache116Agent").last
+    execution = RubyLLM::Agents::Execution.where(agent_type: "CacheCostAgent").last
     breakdown = execution.metadata["cost_breakdown"]
 
     expect(breakdown).to be_present

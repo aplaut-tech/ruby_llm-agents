@@ -14,7 +14,7 @@ Gem::Specification.new do |spec|
                      "and a mountable dashboard UI."
   spec.homepage = "https://github.com/adham90/ruby_llm-agents"
   spec.license = "MIT"
-  spec.required_ruby_version = ">= 3.1.0"
+  spec.required_ruby_version = ">= 3.2.0"
 
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = spec.homepage
@@ -28,7 +28,7 @@ Gem::Specification.new do |spec|
 
   # Runtime dependencies
   spec.add_dependency "rails", ">= 7.0"
-  spec.add_dependency "ruby_llm", ">= 1.16.0"
+  spec.add_dependency "ruby_llm", ">= 2.1", "< 2.2"
   spec.add_dependency "csv"      # Required for Ruby 3.4+ (no longer bundled)
   spec.add_dependency "ostruct"  # Required for Ruby 4.0+ (no longer bundled)
 

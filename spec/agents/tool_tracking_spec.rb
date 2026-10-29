@@ -53,7 +53,7 @@ RSpec.describe "Tool execution tracking", type: :model do
         end
 
         description "A tracked tool"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           "result: #{input}"
@@ -63,7 +63,7 @@ RSpec.describe "Tool execution tracking", type: :model do
       Thread.current[:ruby_llm_agents_caller_context] = pipeline_context
 
       tool = tool_class.new
-      result = tool.call({input: "hello"})
+      result = tool.call(input: "hello")
 
       expect(result).to eq("result: hello")
 
@@ -89,7 +89,7 @@ RSpec.describe "Tool execution tracking", type: :model do
         end
 
         description "A tool that errors"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           raise "boom"
@@ -99,13 +99,40 @@ RSpec.describe "Tool execution tracking", type: :model do
       Thread.current[:ruby_llm_agents_caller_context] = pipeline_context
 
       tool = tool_class.new
-      result = tool.call({input: "test"})
+      result = tool.call(input: "test")
 
       expect(result).to include("ERROR")
 
       record = RubyLLM::Agents::ToolExecution.last
       expect(record.status).to eq("error")
       expect(record.error_message).to eq("boom")
+    end
+  end
+
+  describe "halted tool execution" do
+    it "completes the record with the halt content and re-raises the halt" do
+      tool_class = Class.new(RubyLLM::Agents::Tool) do
+        def self.name
+          "HaltTrackedTool"
+        end
+
+        description "A tool that halts"
+        parameter :input, description: "Input", required: true
+
+        def execute(input:)
+          halt("Limit reached, stop calling tools")
+        end
+      end
+
+      Thread.current[:ruby_llm_agents_caller_context] = pipeline_context
+
+      expect { tool_class.new.call(input: "test") }
+        .to raise_error(RubyLLM::Agents::Tool::Halt, "Limit reached, stop calling tools")
+
+      record = RubyLLM::Agents::ToolExecution.last
+      expect(record.status).to eq("success")
+      expect(record.output).to eq("Limit reached, stop calling tools")
+      expect(record.completed_at).to be_present
     end
   end
 
@@ -118,7 +145,7 @@ RSpec.describe "Tool execution tracking", type: :model do
 
         description "A slow tool"
         timeout 1
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           sleep 2
@@ -129,7 +156,7 @@ RSpec.describe "Tool execution tracking", type: :model do
       Thread.current[:ruby_llm_agents_caller_context] = pipeline_context
 
       tool = tool_class.new
-      result = tool.call({input: "test"})
+      result = tool.call(input: "test")
 
       expect(result).to include("TIMEOUT")
 
@@ -147,7 +174,7 @@ RSpec.describe "Tool execution tracking", type: :model do
         end
 
         description "Untracked tool"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           "ok"
@@ -156,7 +183,7 @@ RSpec.describe "Tool execution tracking", type: :model do
 
       # No Thread.current context set
       tool = tool_class.new
-      result = tool.call({input: "test"})
+      result = tool.call(input: "test")
 
       expect(result).to eq("ok")
       expect(RubyLLM::Agents::ToolExecution.count).to eq(0)
@@ -189,7 +216,7 @@ RSpec.describe "Tool execution tracking", type: :model do
         end
 
         description "Tool without execution"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           "ok"
@@ -197,7 +224,7 @@ RSpec.describe "Tool execution tracking", type: :model do
       end
 
       tool = tool_class.new
-      result = tool.call({input: "test"})
+      result = tool.call(input: "test")
 
       expect(result).to eq("ok")
       expect(RubyLLM::Agents::ToolExecution.count).to eq(0)
@@ -212,7 +239,7 @@ RSpec.describe "Tool execution tracking", type: :model do
         end
 
         description "Iteration tool"
-        param :input, desc: "Input", required: true
+        parameter :input, description: "Input", required: true
 
         def execute(input:)
           "ok"
@@ -222,9 +249,9 @@ RSpec.describe "Tool execution tracking", type: :model do
       Thread.current[:ruby_llm_agents_caller_context] = pipeline_context
 
       tool = tool_class.new
-      tool.call({input: "first"})
-      tool.call({input: "second"})
-      tool.call({input: "third"})
+      tool.call(input: "first")
+      tool.call(input: "second")
+      tool.call(input: "third")
 
       records = RubyLLM::Agents::ToolExecution.where(execution_id: execution.id).order(:iteration)
       expect(records.pluck(:iteration)).to eq([1, 2, 3])

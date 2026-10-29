@@ -38,7 +38,7 @@ RSpec.describe "cache hit result" do
     allow(client).to receive(:messages).and_return([])
     allow(client).to receive(:ask).and_return(
       RubyLLM::Message.new(role: :assistant, content: "hello",
-        input_tokens: 100, output_tokens: 50, model_id: "gpt-4.1")
+        input_tokens: 100, output_tokens: 50, model: "gpt-4.1")
     )
     allow(RubyLLM).to receive(:chat).and_return(client)
   end

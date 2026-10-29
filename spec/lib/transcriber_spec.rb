@@ -430,10 +430,19 @@ RSpec.describe RubyLLM::Agents::Transcriber do
         end
       end
 
-      it "passes response_format to RubyLLM.transcribe" do
+      it "passes the format to RubyLLM.transcribe" do
         expect(RubyLLM).to receive(:transcribe)
-          .with(anything, hash_including(response_format: "srt"))
+          .with(anything, hash_including(format: "srt"))
           .and_return(mock_response)
+
+        srt_transcriber.call(audio: audio_file_path)
+      end
+
+      it "requests no timestamps, which RubyLLM only serves as verbose_json" do
+        expect(RubyLLM).to receive(:transcribe) do |_audio, **options|
+          expect(options).not_to have_key(:timestamps)
+          mock_response
+        end
 
         srt_transcriber.call(audio: audio_file_path)
       end
@@ -451,12 +460,24 @@ RSpec.describe RubyLLM::Agents::Transcriber do
         end
       end
 
-      it "passes timestamp_granularities to RubyLLM.transcribe" do
+      it "passes the timestamp granularities to RubyLLM.transcribe" do
         expect(RubyLLM).to receive(:transcribe)
-          .with(anything, hash_including(timestamp_granularities: ["word", "segment"]))
+          .with(anything, hash_including(timestamps: %i[word segment]))
           .and_return(mock_response)
 
         word_timestamp_transcriber.call(audio: audio_file_path)
+      end
+
+      it "only passes options RubyLLM.transcribe accepts" do
+        accepted = RubyLLM::Transcription.method(:transcribe).parameters
+          .filter_map { |kind, name| name if %i[key keyreq].include?(kind) }
+
+        expect(RubyLLM).to receive(:transcribe) do |_audio, **options|
+          expect(accepted).to include(*options.keys)
+          mock_response
+        end
+
+        word_timestamp_transcriber.call(audio: audio_file_path, language: "en")
       end
     end
 
