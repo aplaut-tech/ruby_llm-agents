@@ -4,7 +4,6 @@ require "rails_helper"
 require "ostruct"
 
 RSpec.describe RubyLLM::Agents::Providers::Inception::Models do
-  let(:capabilities) { RubyLLM::Agents::Providers::Inception::Capabilities }
   let(:slug) { "inception" }
 
   describe ".parse_list_models_response" do
@@ -40,11 +39,11 @@ RSpec.describe RubyLLM::Agents::Providers::Inception::Models do
     end
 
     let(:models) do
-      described_class.parse_list_models_response(api_response, slug, capabilities)
+      described_class.parse_list_models_response(api_response, slug)
     end
 
-    it "returns an array of Model::Info objects" do
-      expect(models).to all(be_a(RubyLLM::Model::Info))
+    it "returns an array of RubyLLM::Model objects" do
+      expect(models).to all(be_a(RubyLLM::Model))
     end
 
     it "parses the correct number of models" do
@@ -121,7 +120,7 @@ RSpec.describe RubyLLM::Agents::Providers::Inception::Models do
       let(:empty_response) { OpenStruct.new(body: {"data" => []}) }
 
       it "returns empty array" do
-        result = described_class.parse_list_models_response(empty_response, slug, capabilities)
+        result = described_class.parse_list_models_response(empty_response, slug)
         expect(result).to eq([])
       end
     end
@@ -130,7 +129,7 @@ RSpec.describe RubyLLM::Agents::Providers::Inception::Models do
       let(:nil_response) { OpenStruct.new(body: {"data" => nil}) }
 
       it "returns empty array" do
-        result = described_class.parse_list_models_response(nil_response, slug, capabilities)
+        result = described_class.parse_list_models_response(nil_response, slug)
         expect(result).to eq([])
       end
     end
@@ -145,7 +144,7 @@ RSpec.describe RubyLLM::Agents::Providers::Inception::Models do
       end
 
       it "sets created_at to nil" do
-        result = described_class.parse_list_models_response(response_without_created, slug, capabilities)
+        result = described_class.parse_list_models_response(response_without_created, slug)
         expect(result.first.created_at).to be_nil
       end
     end
@@ -160,7 +159,7 @@ RSpec.describe RubyLLM::Agents::Providers::Inception::Models do
       end
 
       it "compacts nil metadata values" do
-        result = described_class.parse_list_models_response(response_minimal, slug, capabilities)
+        result = described_class.parse_list_models_response(response_minimal, slug)
         expect(result.first.metadata).to eq({})
       end
     end

@@ -1,0 +1,127 @@
+[
+  {
+    "id": "mercury-2",
+    "name": "Mercury 2",
+    "provider": "inception",
+    "family": "mercury",
+    "created_at": null,
+    "context_window": 128000,
+    "max_output_tokens": 32000,
+    "knowledge_cutoff": null,
+    "modalities": {
+      "input": [
+        "text"
+      ],
+      "output": [
+        "text"
+      ]
+    },
+    "capabilities": [
+      "streaming",
+      "function_calling",
+      "structured_output",
+      "reasoning"
+    ],
+    "pricing": {
+      "text_tokens": {
+        "standard": {
+          "input_per_million": 0.25,
+          "output_per_million": 0.75
+        }
+      }
+    },
+    "metadata": {}
+  },
+  {
+    "id": "mercury",
+    "name": "Mercury",
+    "provider": "inception",
+    "family": "mercury",
+    "created_at": null,
+    "context_window": 128000,
+    "max_output_tokens": 32000,
+    "knowledge_cutoff": null,
+    "modalities": {
+      "input": [
+        "text"
+      ],
+      "output": [
+        "text"
+      ]
+    },
+    "capabilities": [
+      "streaming",
+      "function_calling",
+      "structured_output"
+    ],
+    "pricing": {
+      "text_tokens": {
+        "standard": {
+          "input_per_million": 0.25,
+          "output_per_million": 0.75
+        }
+      }
+    },
+    "metadata": {}
+  },
+  {
+    "id": "mercury-coder-small",
+    "name": "Mercury Coder Small",
+    "provider": "inception",
+    "family": "mercury",
+    "created_at": null,
+    "context_window": 128000,
+    "max_output_tokens": 32000,
+    "knowledge_cutoff": null,
+    "modalities": {
+      "input": [
+        "text"
+      ],
+      "output": [
+        "text"
+      ]
+    },
+    "capabilities": [
+      "streaming"
+    ],
+    "pricing": {
+      "text_tokens": {
+        "standard": {
+          "input_per_million": 0.25,
+          "output_per_million": 1.0
+        }
+      }
+    },
+    "metadata": {}
+  },
+  {
+    "id": "mercury-edit",
+    "name": "Mercury Edit",
+    "provider": "inception",
+    "family": "mercury",
+    "created_at": null,
+    "context_window": 128000,
+    "max_output_tokens": 32000,
+    "knowledge_cutoff": null,
+    "modalities": {
+      "input": [
+        "text"
+      ],
+      "output": [
+        "text"
+      ]
+    },
+    "capabilities": [
+      "streaming"
+    ],
+    "pricing": {
+      "text_tokens": {
+        "standard": {
+          "input_per_million": 0.25,
+          "output_per_million": 1.0
+        }
+      }
+    },
+    "metadata": {}
+  }
+]

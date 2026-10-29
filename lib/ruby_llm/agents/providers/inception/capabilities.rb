@@ -3,7 +3,7 @@
 module RubyLLM
   module Agents
     module Providers
-      class Inception
+      class Inception < ::RubyLLM::Provider
         # Determines capabilities and pricing for Inception Mercury models.
         #
         # Mercury models are diffusion LLMs with text-only I/O.
@@ -88,6 +88,16 @@ module RubyLLM
             end
             caps << "reasoning" if REASONING_MODELS.include?(model_id)
             caps
+          end
+
+          # RubyLLM's capability augmenter hook: adds what Capabilities knows
+          # about a Mercury model to the capabilities a catalog reports.
+          #
+          # @param capabilities [Array<String>] Reported capabilities
+          # @param model_id [String]
+          # @return [Array<String>]
+          def augment(capabilities, model_id:, **)
+            capabilities | capabilities_for(model_id)
           end
 
           def pricing_for(model_id)

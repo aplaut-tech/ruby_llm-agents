@@ -202,4 +202,15 @@ RSpec.describe RubyLLM::Agents::Providers::Inception::Capabilities do
       })
     end
   end
+
+  describe ".augment" do
+    it "adds the model's capabilities to the reported ones" do
+      expect(described_class.augment(["vision"], model_id: "mercury-2", modalities: {}))
+        .to eq(%w[vision streaming function_calling structured_output reasoning])
+    end
+
+    it "does not duplicate capabilities already reported" do
+      expect(described_class.augment(["streaming"], model_id: "mercury-coder-small")).to eq(["streaming"])
+    end
+  end
 end

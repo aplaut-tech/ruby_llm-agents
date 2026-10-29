@@ -3,19 +3,41 @@
 require "rails_helper"
 
 RSpec.describe RubyLLM::Agents::Providers::Inception::Registry do
-  describe ".register_models!" do
-    it "registers all Mercury models in the RubyLLM registry" do
-      described_class::MODELS.each do |model_def|
-        model = RubyLLM::Models.find(model_def[:id])
-        expect(model).to be_a(RubyLLM::Model::Info)
-        expect(model.id).to eq(model_def[:id])
+  describe "catalog registration" do
+    it "registers the catalog file with RubyLLM" do
+      expect(RubyLLM::Provider.model_registry_files[:inception]).to eq(described_class::FILE)
+    end
+
+    it "resolves all Mercury models through the RubyLLM registry" do
+      registry = RubyLLM::Models.new
+      described_class::MODELS.each do |model_id|
+        model = registry.find(model_id)
+        expect(model).to be_a(RubyLLM::Model)
+        expect(model.id).to eq(model_id)
         expect(model.provider).to eq("inception")
+      end
+    end
+
+    it "ships a catalog file in sync with Capabilities" do
+      shipped = JSON.parse(File.read(described_class::FILE))
+      expect(shipped).to eq(JSON.parse(JSON.generate(described_class.catalog)))
+    end
+  end
+
+  describe ".write!" do
+    it "writes the catalog as a RubyLLM registry file" do
+      Tempfile.create(["inception", ".json"]) do |file|
+        described_class.write!(file.path)
+        models = RubyLLM::Models.new(RubyLLM::Models.models_from_file(file.path))
+        expect(models.all.map(&:id)).to eq(described_class::MODELS)
       end
     end
   end
 
+  let(:registry) { RubyLLM::Models.new }
+
   describe "mercury-2 model resolution" do
-    let(:model) { RubyLLM::Models.find("mercury-2") }
+    let(:model) { registry.find("mercury-2") }
 
     it "has correct provider" do
       expect(model.provider).to eq("inception")
@@ -65,7 +87,7 @@ RSpec.describe RubyLLM::Agents::Providers::Inception::Registry do
   end
 
   describe "mercury model resolution" do
-    let(:model) { RubyLLM::Models.find("mercury") }
+    let(:model) { registry.find("mercury") }
 
     it "resolves to inception provider" do
       expect(model.provider).to eq("inception")
@@ -77,7 +99,7 @@ RSpec.describe RubyLLM::Agents::Providers::Inception::Registry do
   end
 
   describe "mercury-coder-small model resolution" do
-    let(:model) { RubyLLM::Models.find("mercury-coder-small") }
+    let(:model) { registry.find("mercury-coder-small") }
 
     it "resolves to inception provider" do
       expect(model.provider).to eq("inception")
@@ -93,7 +115,7 @@ RSpec.describe RubyLLM::Agents::Providers::Inception::Registry do
   end
 
   describe "mercury-edit model resolution" do
-    let(:model) { RubyLLM::Models.find("mercury-edit") }
+    let(:model) { registry.find("mercury-edit") }
 
     it "resolves to inception provider" do
       expect(model.provider).to eq("inception")

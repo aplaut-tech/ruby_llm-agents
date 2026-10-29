@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "rails_helper"
-require "ostruct"
 
 RSpec.describe RubyLLM::Agents::Providers::Inception do
   describe "provider registration" do
@@ -32,19 +31,45 @@ RSpec.describe RubyLLM::Agents::Providers::Inception do
     end
   end
 
+  describe ".configuration_options" do
+    it "declares the API key and base URL options" do
+      expect(described_class.configuration_options).to eq(%i[inception_api_key inception_api_base])
+    end
+  end
+
   describe "inheritance" do
-    it "inherits from RubyLLM::Providers::OpenAI" do
-      expect(described_class.superclass).to eq(RubyLLM::Providers::OpenAI)
+    it "is a RubyLLM provider of its own" do
+      expect(described_class.superclass).to eq(RubyLLM::Provider)
+    end
+  end
+
+  describe "protocols" do
+    it "speaks Chat Completions by default" do
+      expect(described_class.default_protocol).to eq(:chat_completions)
+      expect(described_class.protocols[:chat_completions]).to eq(described_class::ChatCompletions)
+    end
+
+    it "builds on RubyLLM's Chat Completions protocol" do
+      expect(described_class::ChatCompletions.superclass).to eq(RubyLLM::Protocols::ChatCompletions)
+    end
+
+    it "parses the /models listing with Mercury capabilities" do
+      expect(described_class::ChatCompletions.ancestors).to include(described_class::Models)
     end
   end
 
   describe "instance methods" do
-    let(:config) { OpenStruct.new(inception_api_key: "test-inception-key-123") }
+    let(:config) { RubyLLM.config.dup.tap { |c| c.inception_api_key = "test-inception-key-123" } }
     let(:provider) { described_class.new(config) }
 
     describe "#api_base" do
       it "returns the Inception API base URL" do
         expect(provider.api_base).to eq("https://api.inceptionlabs.ai/v1")
+      end
+
+      it "honors inception_api_base" do
+        config.inception_api_base = "https://proxy.example.com/v1"
+        expect(provider.api_base).to eq("https://proxy.example.com/v1")
       end
     end
 
@@ -73,7 +98,7 @@ RSpec.describe RubyLLM::Agents::Providers::Inception do
       end
 
       it "raises ConfigurationError when api key is nil" do
-        config_without_key = OpenStruct.new(inception_api_key: nil)
+        config_without_key = RubyLLM.config.dup.tap { |c| c.inception_api_key = nil }
         expect { described_class.new(config_without_key) }
           .to raise_error(RubyLLM::ConfigurationError, /inception_api_key/)
       end
@@ -84,6 +109,11 @@ RSpec.describe RubyLLM::Agents::Providers::Inception do
     it "adds inception_api_key to RubyLLM::Configuration" do
       expect(RubyLLM.config).to respond_to(:inception_api_key)
       expect(RubyLLM.config).to respond_to(:inception_api_key=)
+    end
+
+    it "adds inception_api_base to RubyLLM::Configuration" do
+      expect(RubyLLM.config).to respond_to(:inception_api_base)
+      expect(RubyLLM.config).to respond_to(:inception_api_base=)
     end
 
     it "allows setting inception_api_key via RubyLLM.configure" do
